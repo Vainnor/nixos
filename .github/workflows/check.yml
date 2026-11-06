@@ -1,0 +1,25 @@
+# Evaluates every configuration (the PC, the installer ISO, the Mac) on each
+# push and pull request. Nothing is built, so it takes a couple of minutes.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Format
+        run: nix fmt -- --ci
+      - name: Evaluate
+        run: |
+          nix flake check --no-build --all-systems
+          nix eval --raw .#darwinConfigurations.Vainnors-MacBook-Pro.system.drvPath > /dev/null
