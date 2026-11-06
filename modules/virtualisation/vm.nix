@@ -141,6 +141,7 @@ in
             <vpindex state="on"/><runtime state="on"/><synic state="on"/>
             <stimer state="on"/><reset state="on"/><frequencies state="on"/>
             <tlbflush state="on"/><ipi state="on"/>
+            <vendor_id state="on" value="1234567890ab"/>
           </hyperv>
           <smm state="on"/>
         </features>
@@ -259,13 +260,15 @@ in
       reserve = vfio != null && vfio.reserveGpu or false;
       used = "/run/${vmName}-gpu-used";
       # Runs instead of `modprobe amdgpu` (amdgpu loads for the CPU's
-      # graphics): before amdgpu can grab the 7900 XTX, shrink its BAR to 8 GB
-      # (Windows gives code 43 with the full 32 GB, and the size can't change
-      # once a driver holds the card) and give it to vfio-pci.
+      # graphics): before amdgpu can grab the 7900 XTX, shrink its BARs to
+      # 8 GB and 8 MB (Windows gives code 43 with the full 32 GB / 256 MB, and
+      # the sizes can't change once a driver holds the card) and give it to
+      # vfio-pci.
       claimGpu = pkgs.writeShellScript "claim-gpu-for-vfio" ''
         d=/sys/bus/pci/devices/${vfio.gpu}
         if [ ! -e "$d/driver" ]; then
           echo 13 > "$d/resource0_resize" 2>/dev/null || true
+          echo 3 > "$d/resource2_resize" 2>/dev/null || true
           echo vfio-pci > "$d/driver_override"
           ${pkgs.kmod}/bin/modprobe vfio-pci
           echo ${vfio.gpu} > /sys/bus/pci/drivers_probe
@@ -292,8 +295,8 @@ in
           [ "$(basename "$(readlink "$p/driver" 2>/dev/null)")" = vfio-pci ] || continue
           echo "Handing $d to Linux"
           sudo sh -c "echo > $p/driver_override; echo $d > /sys/bus/pci/drivers/vfio-pci/unbind"
-          # Full 32 GB BAR again for Linux (resizable BAR).
-          [ "$d" = ${vfio.gpu} ] && sudo sh -c "echo 15 > $p/resource0_resize" 2>/dev/null || true
+          # Full-size BARs again for Linux (resizable BAR).
+          [ "$d" = ${vfio.gpu} ] && sudo sh -c "echo 15 > $p/resource0_resize; echo 8 > $p/resource2_resize" 2>/dev/null || true
           sudo sh -c "echo $d > /sys/bus/pci/drivers_probe"
         done
         sudo systemctl restart lactd.service
@@ -324,6 +327,7 @@ in
           # (2^13 MB) works. Only possible while no driver owns the card.
           if [ -e "$d/resource0_resize" ] && [ "$1" = "${vfio.gpu}" ]; then
             echo 13 > "$d/resource0_resize" 2>/dev/null || echo "BAR resize failed; continuing" >&2
+            echo 3 > "$d/resource2_resize" 2>/dev/null || true # BAR 2 over 8 MB: code 43 too
           fi
           echo "$1" > /sys/bus/pci/drivers_probe
         }
