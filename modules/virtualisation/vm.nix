@@ -82,12 +82,16 @@ in
         </disk>'';
 
       # Shared by both Windows VMs: UEFI with Secure Boot, Hyper-V enlightenments, clock.
+      # The Secure Boot firmware that ships with QEMU has no Microsoft keys loaded
+      # ("enrolled-keys"), and asking for them makes `virsh define` fail with
+      # "Unable to find 'efi' firmware". Windows 11 only needs Secure Boot to be
+      # supported, so it installs and runs fine without the keys.
       firmware = ''
         <os firmware="efi">
           <type arch="x86_64" machine="q35">hvm</type>
           <firmware>
             <feature enabled="yes" name="secure-boot"/>
-            <feature enabled="yes" name="enrolled-keys"/>
+            <feature enabled="no" name="enrolled-keys"/>
           </firmware>
         </os>
         <features>
