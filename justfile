@@ -100,6 +100,74 @@ obs-reset:
     mv ~/.local/share/vainnor-overlays/js/config.js ~/.local/share/vainnor-overlays/js/config.js.bak-$(date +%F_%H-%M-%S) || true
     nh os switch {{ flake }}
 
+# ── Secrets (sops) ─────────────────────────────────────────────────────
+
+# Edit the encrypted secrets (on the Mac, which holds the editing key)
+secrets-edit:
+    sops secrets/secrets.yaml
+
+# Print this PC's age recipient (run on the PC)
+secrets-host:
+    @nix --extra-experimental-features 'nix-command flakes' run nixpkgs#ssh-to-age -- -i /persistent/etc/ssh/ssh_host_ed25519_key.pub
+
+# Add the PC as a recipient, re-encrypt, and turn secrets on (run on the Mac)
+secrets-add-host key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    grep -q "{{ key }}" .sops.yaml || {
+      sed -i.bak -e 's|^  # - &arc age1.*|  - \&arc {{ key }} # the PC (arc)|' -e 's|^          # - \*arc|          - *arc|' .sops.yaml
+      rm -f .sops.yaml.bak
+    }
+    sops updatekeys --yes secrets/secrets.yaml
+    sed -i.bak 's|secretsReady = false;|secretsReady = true;|' modules/flake/meta.nix && rm -f modules/flake/meta.nix.bak
+    echo "Done. Review with git diff, then: just commit 'chore: add arc as a secrets recipient' && just deploy"
+
+# ── Secure Boot + TPM ──────────────────────────────────────────────────
+
+# Show Secure Boot state and whether this boot was signed
+secureboot-status:
+    sudo sbctl status
+    bootctl status 2>/dev/null | grep -iE 'secure boot|setup mode' || true
+
+# After Secure Boot is ON: unlock the disk with the TPM (passphrase still works)
+tpm-enroll:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bootctl status 2>/dev/null | grep -qi 'Secure Boot: enabled' || { echo "Turn Secure Boot on first (just secureboot-status)."; exit 1; }
+    sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 /dev/disk/by-partlabel/disk-main-luks
+
+# ── Virtual machines ───────────────────────────────────────────────────
+
+# Show the GPU's PCI addresses and IOMMU group (for meta.vfio)
+vm-gpu:
+    #!/usr/bin/env bash
+    for d in /sys/bus/pci/devices/*; do
+      n=$(basename "$d"); g=$(basename "$(readlink "$d/iommu_group" 2>/dev/null)" 2>/dev/null)
+      lspci -nns "$n" | grep -qiE 'vga|audio|non-volatile' && echo "group ${g:-?}  $(lspci -nns "$n")"
+    done | sort -V
+
+# List USB devices (vendor:product) to pass into the Windows VM
+vm-usb:
+    lsusb
+
+# One-time: start libvirt's default network and define the Windows VM
+vm-setup:
+    sudo virsh net-autostart default
+    sudo virsh net-start default || true
+    sudo virsh define /etc/libvirt-templates/win11.xml
+
+# Create the Windows VM disk image (sparse), e.g. `just vm-disk 250G`
+vm-disk size="250G":
+    sudo qemu-img create -f raw /var/lib/libvirt/images/win11.img {{ size }}
+
+# Download the virtio drivers ISO; put your Windows 11 ISO at /var/lib/libvirt/images/Win11.iso
+vm-virtio:
+    sudo curl -L -o /var/lib/libvirt/images/virtio-win.iso https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+
+# Start Windows with the GPU (your Linux session closes until Windows shuts down)
+windows:
+    sudo virsh start win11
+
 # ── Impermanence helpers ───────────────────────────────────────────────
 
 # List files on the wiped root that will be lost at reboot (find state worth persisting)

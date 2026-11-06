@@ -14,6 +14,7 @@ in
       dev
       privacy
       streaming
+      vm
       arc
     ];
   };

@@ -1,0 +1,11 @@
+# Who can decrypt secrets/*.yaml. After editing this file run
+#   sops updatekeys secrets/secrets.yaml
+keys:
+  - &mac age1g8rwdq87ewjphu9s4f4dhx03sxg33a7xxs78l2rcwa9zhgvyxpnsxx056y # MacBook (edits secrets)
+  # - &arc age1...   # the PC: `just secrets-host` prints it
+creation_rules:
+  - path_regex: secrets/[^/]+\.yaml$
+    key_groups:
+      - age:
+          - *mac
+          # - *arc

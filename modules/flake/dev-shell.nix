@@ -11,6 +11,9 @@
           nix-output-monitor
           git
           just
+          sops
+          age
+          ssh-to-age
         ];
       };
     };

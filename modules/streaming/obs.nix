@@ -23,7 +23,9 @@
 # These files are only SEEDED: OBS owns them afterwards, so your changes in
 # OBS stick. `just obs-reset` backs them up and seeds fresh copies.
 #
-# Still yours to do in OBS: stream key / Twitch account (Settings > Stream),
+# The Twitch stream key and StreamElements token come from sops
+# (secrets/secrets.yaml) once meta.secretsReady is on.
+# Still yours to do in OBS: connect the Twitch account for VOD track (Settings > Stream),
 # pick the Brio in "Webcam" if it isn't picked, and launch games with
 # `obs-gamecapture %command%` in Steam so "Game Capture" sees them.
 { config, ... }:
@@ -34,8 +36,21 @@ let
 in
 {
   flake.modules.nixos.streaming =
-    { pkgs, ... }:
+    { pkgs, lib, ... }:
     {
+      # Decrypted to /run/secrets/... (owned by you) once secrets are set up.
+      sops.secrets = lib.mkIf meta.secretsReady (
+        lib.genAttrs
+          [
+            "twitch/stream_key"
+            "streamelements/channel_id"
+            "streamelements/jwt"
+          ]
+          (_: {
+            owner = meta.username;
+          })
+      );
+
       programs.obs-studio = {
         enable = true;
         enableVirtualCamera = true;
@@ -396,7 +411,31 @@ in
 
       seeds = sceneFiles // profile;
 
-      # The overlay pack, minus config.js (that one is writable and seeded below).
+      # Overlay settings (js/config.js), regenerated on every switch. Edit here,
+      # not in the file. Secrets and the WebSocket password are added at activation.
+      overlaySettings = {
+        channel = "vainnor"; # Twitch name for chat captions
+        minutes = 5; # Starting Soon countdown
+        endHold = 20; # seconds on the Ending card
+        nowPlaying = "";
+        discord = "";
+        startTime = "";
+        gameplayCrawl = false;
+        camera = true;
+        cameraSource = "Webcam"; # bezel follows this OBS source
+        obsUrl = "ws://127.0.0.1:4455";
+        chatMax = 6;
+        chatTtl = 60;
+        hideUsers = [
+          "nightbot"
+          "streamelements"
+          "streamlabs"
+          "moobot"
+        ];
+        debug = false;
+      };
+
+      # The overlay pack, minus config.js (generated below, keeps secrets out of the store).
       overlays = lib.fileset.toSource {
         root = ../../assets/overlays;
         fileset = lib.fileset.difference ../../assets/overlays ../../assets/overlays/js/config.js;
@@ -407,6 +446,8 @@ in
       wsConfig = "${obsDir}/plugin_config/obs-websocket/config.json";
     in
     {
+      home.packages = [ pkgs.chatterino2 ]; # Twitch chat
+
       home.file.".local/share/vainnor-overlays" = {
         source = overlays;
         recursive = true;
@@ -432,16 +473,26 @@ in
           chmod 0600 "${wsConfig}"
         fi
 
-        # Overlay settings: seeded once with the WebSocket password and webcam
-        # name. Add your StreamElements token here later; it never enters git.
+        secret() { if [ -r "/run/secrets/$1" ]; then cat "/run/secrets/$1"; fi; }
+
+        # Overlay settings: rebuilt every switch from overlaySettings + secrets.
         cfg="$HOME/.local/share/vainnor-overlays/js/config.js"
-        if [ ! -e "$cfg" ]; then
-          pw="$(${jq} -r .server_password "${wsConfig}")"
-          ${pkgs.gnused}/bin/sed \
-            -e "s|cameraSource: \"\",|cameraSource: \"Webcam\",|" \
-            -e "s|obsPassword: \"\",|obsPassword: \"$pw\",|" \
-            ${../../assets/overlays/js/config.js} > "$cfg"
-          chmod 0600 "$cfg"
+        ${jq} -n \
+          --argjson base ${lib.escapeShellArg (builtins.toJSON overlaySettings)} \
+          --arg pw "$(${jq} -r .server_password "${wsConfig}")" \
+          --arg seId "$(secret streamelements/channel_id)" \
+          --arg seJwt "$(secret streamelements/jwt)" \
+          '$base + {obsPassword: $pw, seChannelId: $seId, seJwt: $seJwt}' > "$cfg.tmp"
+        { printf 'window.VAINNOR = '; cat "$cfg.tmp"; printf ';\n'; } > "$cfg"
+        rm -f "$cfg.tmp"
+        chmod 0600 "$cfg"
+
+        # Twitch stream key from sops, seeded into the profile once.
+        svc="${obsDir}/basic/profiles/Vainnor/service.json"
+        if [ ! -e "$svc" ] && [ -r /run/secrets/twitch/stream_key ]; then
+          ${jq} -n --arg key "$(secret twitch/stream_key)" \
+            '{type: "rtmp_common", settings: {service: "Twitch", server: "auto", key: $key, bwtest: false}}' > "$svc"
+          chmod 0600 "$svc"
         fi
       '';
     };

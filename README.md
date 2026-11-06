@@ -17,6 +17,7 @@ Files and folders whose path contains `/_` (for example `hosts/arc/_disko.nix`) 
 | `gaming`  | Steam + Proton-GE, gamescope, gamemode, MangoHud, amdgpu/LACT                  |
 | `dev`     | Zed, vis, git, direnv, nix-ld, rootless Docker                                 |
 | `privacy` | i2pd                                                                           |
+| `vm`      | libvirt + virt-manager, Windows 11 VM with the 7900 XTX passed through          |
 | `streaming` | OBS with the Vainnor overlays (`assets/overlays`), 3 theme scene collections, BEACN-style tracks |
 
 `modules/hosts/arc/default.nix` picks the aspects for this machine. Shared values (username,
@@ -58,6 +59,29 @@ Because `/etc/shadow` is wiped as well, your password is stored as a hash in `/p
 mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 ```
 
+## After installing (once)
+
+### Secure Boot + TPM unlock
+1. On first boot, your own Secure Boot keys are created in `/var/lib/sbctl` (kept on `/persistent`).
+2. Reboot into the BIOS. Go to *Security > Secure Boot*, set the mode to **Custom**, then **delete all keys** (this is Setup Mode). Save and reboot. systemd-boot enrolls your keys plus Microsoft's; Windows and the GPU's option ROM need Microsoft's.
+3. Back in the BIOS, turn Secure Boot **on**. Then run `just secureboot-status`. It should show *Secure Boot: enabled*.
+4. Run `just tpm-enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
+
+### Secrets (sops)
+`secrets/secrets.yaml` is encrypted (it holds the Twitch stream key and the StreamElements ID and token). Only the recipients in `.sops.yaml` can open it.
+1. The installer prints the PC's age key, and also saves it in `~/nixos/HOST_AGE_KEY.txt`. `just secrets-host` shows it again.
+2. On the Mac, run `just secrets-add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
+3. Run `just secrets-edit` to fill in real values, then `just commit "..."` and `just deploy`.
+
+### Windows VM with the GPU
+1. Run `just vm-gpu` and `just vm-usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `just switch`.
+2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`. Then run `just vm-virtio`, `just vm-disk 250G` and `just vm-setup`.
+3. `just windows` starts the VM. Your Linux session closes, and Windows takes over the monitors at near-native speed. When you shut Windows down, you're back at the Linux login.
+   The first time, install Windows and load the virtio drivers from the second CD drive.
+   To boot your existing Windows install instead, set `meta.vfio.windowsNvme` to its NVMe's PCI address. Windows may then ask you to re-activate.
+
+Games with kernel anti-cheat refuse to run in VMs. For those, boot Windows natively: use the power menu's **Reboot to Windows**, or press F11 at boot.
+
 ## Day to day
 
 Run `just` to see all recipes. The common ones:
@@ -76,6 +100,9 @@ Run `just` to see all recipes. The common ones:
 | `just ephemeral` | List files on `/` that would be lost at reboot |
 | `just password` | Change your login password |
 | `just iso` | Build the custom installer ISO |
+| `just secrets-edit` | Edit the encrypted secrets (on the Mac) |
+| `just secureboot-status` / `just tpm-enroll` | Check Secure Boot / enroll the TPM unlock |
+| `just windows` | Start the Windows VM with the GPU passed through |
 | `just audio-devices` | List audio outputs (set the real one as `meta.audioOutput`) |
 | `just obs-reset` | Back up OBS settings and re-seed the Vainnor profile/scenes |
 

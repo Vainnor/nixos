@@ -33,6 +33,8 @@ in
           pkgs.gnugrep
           pkgs.git
           pkgs.mkpasswd
+          pkgs.openssh
+          pkgs.ssh-to-age
         ];
         text = ''
           HOST="''${1:-arc}"
@@ -94,6 +96,11 @@ in
           printf '%s\n' "$HASH" > "/mnt/persistent/passwords/$USERNAME"
           chmod 0600 "/mnt/persistent/passwords/$USERNAME"
 
+          echo ">> Creating the SSH host key (also the key that decrypts secrets)"
+          install -d -m 0755 /mnt/persistent/etc/ssh
+          ssh-keygen -q -t ed25519 -N "" -C "root@$HOST" -f /mnt/persistent/etc/ssh/ssh_host_ed25519_key
+          AGE_KEY="$(ssh-to-age < /mnt/persistent/etc/ssh/ssh_host_ed25519_key.pub)"
+
           echo ">> Installing (this downloads the whole system, give it a while)"
           nixos-install --flake "path:$FLAKE#$HOST" --no-root-passwd --no-channel-copy
 
@@ -107,6 +114,11 @@ in
           echo
           echo "Done. Remove the USB stick and reboot. Pick the NixOS drive with F11 if Windows starts."
           echo "After logging in: sudo netbird up"
+          echo
+          echo "Secrets: on the Mac run   just secrets-add-host $AGE_KEY"
+          echo "(also saved in ~/nixos/HOST_AGE_KEY.txt)"
+          echo "$AGE_KEY" > "/mnt/home/$USERNAME/nixos/HOST_AGE_KEY.txt"
+          nixos-enter --root /mnt -c "chown $USERNAME:users /home/$USERNAME/nixos/HOST_AGE_KEY.txt"
         '';
       };
     in

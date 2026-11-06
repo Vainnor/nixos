@@ -32,6 +32,22 @@
     # on the PC to list them. null = virtual channels exist but System isn't default.
     audioOutput = null;
 
+    # Wallpaper: a nixos-artwork name (e.g. "catppuccin-mocha", "nineish-dark-gray")
+    # or a path like ../../assets/wallpaper.png. Colours still come from `theme`.
+    wallpaper = "catppuccin-mocha";
+
+    # sops-nix secrets (secrets/secrets.yaml). Flip to true once the PC's host
+    # key is a recipient in .sops.yaml and the file was re-encrypted
+    # (`just secrets-host` on the PC, then `just secrets-add-host <key>` on the Mac).
+    secretsReady = false;
+
+    # GPU passthrough to the Windows VM. null = libvirt/virt-manager only.
+    # Fill in from `just vm-gpu` / `just vm-usb` on the PC, e.g.
+    #   { gpu = "0000:03:00.0"; gpuAudio = "0000:03:00.1";
+    #     usb = [ { vendor = "0x046d"; product = "0x0000"; } ];
+    #     windowsNvme = null; }   # or the PCI address of the Windows NVMe to boot real Windows
+    vfio = null;
+
     # Public SSH keys allowed to log in (over NetBird only). Paste yours here.
     sshKeys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores vainnor@Carsons-MBP.home"

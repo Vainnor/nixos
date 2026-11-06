@@ -17,7 +17,13 @@
           "network"
           "cpu"
           "memory"
+          "custom/power"
         ];
+        "custom/power" = {
+          format = "⏻";
+          tooltip = false;
+          on-click = "power-menu";
+        };
         "ext/workspaces" = {
           format = "{name}";
           on-click = "activate";

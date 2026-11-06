@@ -15,15 +15,17 @@ let
   };
 in
 {
-  flake.modules.nixos = lib.genAttrs [ "desktop" "gaming" "dev" "privacy" "streaming" ] forward // {
-    base = {
-      imports = [ inputs.home-manager.nixosModules.home-manager ];
-      home-manager = {
-        useGlobalPkgs = true;
-        useUserPackages = true;
-        backupFileExtension = "hm-backup";
-        users.${user}.imports = [ hm.base ];
+  flake.modules.nixos =
+    lib.genAttrs [ "desktop" "gaming" "dev" "privacy" "streaming" "vm" ] forward
+    // {
+      base = {
+        imports = [ inputs.home-manager.nixosModules.home-manager ];
+        home-manager = {
+          useGlobalPkgs = true;
+          useUserPackages = true;
+          backupFileExtension = "hm-backup";
+          users.${user}.imports = [ hm.base ];
+        };
       };
     };
-  };
 }

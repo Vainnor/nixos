@@ -14,6 +14,11 @@ in
 
       stylix = {
         enable = true;
+        image =
+          if builtins.isPath meta.wallpaper then
+            meta.wallpaper
+          else
+            pkgs.nixos-artwork.wallpapers.${meta.wallpaper}.gnomeFilePath;
         base16Scheme = "${pkgs.base16-schemes}/share/themes/${meta.theme}.yaml";
         polarity = "dark";
 
@@ -77,9 +82,9 @@ in
         cursor_size = 24;
       };
 
-      # Solid-colour wallpaper from the palette. Swap for `swaybg -i <image>`.
+      # Wallpaper from meta.wallpaper (see flake/meta.nix).
       wayland.windowManager.mango.autostart_sh = ''
-        ${pkgs.swaybg}/bin/swaybg -c '#${c.base00}' &
+        ${pkgs.swaybg}/bin/swaybg -m fill -i ${config.stylix.image} &
       '';
     };
 }
