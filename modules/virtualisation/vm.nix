@@ -43,8 +43,10 @@ in
           m = builtins.match "([0-9a-f]{4}):([0-9a-f]{2}):([0-9a-f]{2})\\.([0-7])" addr;
         in
         ''<address domain="0x${builtins.elemAt m 0}" bus="0x${builtins.elemAt m 1}" slot="0x${builtins.elemAt m 2}" function="0x${builtins.elemAt m 3}"/>'';
+      # managed="no": the hook moves devices to vfio-pci itself, and nothing
+      # ever moves them back (see the hook for why).
       hostdev = addr: ''
-        <hostdev mode="subsystem" type="pci" managed="yes">
+        <hostdev mode="subsystem" type="pci" managed="no">
           <source>${pci addr}</source>
         </hostdev>'';
       usbdev = d: ''
@@ -216,34 +218,70 @@ in
       '';
 
       # Runs as root from libvirtd around the VM's lifetime.
+      #
+      # The GPU is never handed back to Linux: on current kernels, unbinding an
+      # AMD card from vfio-pci crashes the kernel (NULL dereference in
+      # vfio_pci_core_sriov_configure, seen on RDNA3/RDNA4 from 6.18 to 7.3).
+      # So when Windows shuts down, the PC reboots straight back into Linux.
+      passthrough = [
+        vfio.gpu
+        vfio.gpuAudio
+      ]
+      ++ lib.optional (vfio.windowsNvme or null != null) vfio.windowsNvme;
       hook = pkgs.writeShellScript "gpu-passthrough-hook" ''
         set -u
         [ "$1" = "${vmName}" ] || exit 0
+        PATH=${
+          lib.makeBinPath [
+            pkgs.coreutils
+            pkgs.kmod
+            pkgs.systemd
+            pkgs.psmisc
+          ]
+        }
+        taken=/run/${vmName}-gpu-taken
+        to_vfio() {
+          d=/sys/bus/pci/devices/$1
+          echo vfio-pci > "$d/driver_override"
+          if [ -e "$d/driver" ]; then echo "$1" > "$d/driver/unbind"; fi
+          echo "$1" > /sys/bus/pci/drivers_probe
+        }
+        restore_desktop() {
+          echo 0 > /proc/sys/vm/nr_hugepages
+          for c in /sys/class/vtconsole/vtcon*/bind; do echo 1 > "$c" || true; done
+          systemctl start lactd.service greetd
+        }
         case "$2/$3" in
           prepare/begin)
+            # 16 GiB in 2 MiB pages, before touching the desktop (compact first
+            # so fragmented RAM doesn't make it fall short).
+            sync; echo 3 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory
+            echo 8192 > /proc/sys/vm/nr_hugepages
+            if [ "$(cat /proc/sys/vm/nr_hugepages)" -lt 8192 ]; then
+              echo "Only $(cat /proc/sys/vm/nr_hugepages) of 8192 hugepages free; close some apps and try again." >&2
+              echo 0 > /proc/sys/vm/nr_hugepages
+              exit 1
+            fi
             systemctl stop greetd lactd.service 2>/dev/null
             sleep 3
             # Anything still holding the card (user services kept alive by an
             # SSH login, for example) would make the handoff hang.
-            ${pkgs.psmisc}/bin/fuser -k /dev/dri/by-path/pci-${vfio.gpu}-* 2>/dev/null || true
+            fuser -k /dev/dri/by-path/pci-${vfio.gpu}-* 2>/dev/null || true
             sleep 1
             for c in /sys/class/vtconsole/vtcon*/bind; do echo 0 > "$c" || true; done
             echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind 2>/dev/null || true
-            # 16 GiB in 2 MiB pages; compact first so fragmented RAM doesn't make it fall short.
-            sync; echo 3 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory
-            echo 8192 > /proc/sys/vm/nr_hugepages
-            if [ "$(cat /proc/sys/vm/nr_hugepages)" -lt 8192 ]; then
-              echo "Only $(cat /proc/sys/vm/nr_hugepages) of 8192 hugepages; close some apps and try again." >&2
-              echo 0 > /proc/sys/vm/nr_hugepages
-              for c in /sys/class/vtconsole/vtcon*/bind; do echo 1 > "$c" || true; done
-              systemctl start lactd.service greetd
-              exit 1
-            fi
+            modprobe vfio-pci
+            touch "$taken"
+            ${lib.concatMapStrings (a: "to_vfio ${a}\n            ") passthrough}
             ;;
           release/end)
-            echo 0 > /proc/sys/vm/nr_hugepages
-            for c in /sys/class/vtconsole/vtcon*/bind; do echo 1 > "$c" || true; done
-            systemctl start lactd.service greetd
+            # Windows shut down (or failed to start). If the GPU went to the VM,
+            # reboot into Linux; otherwise just bring the desktop back.
+            if [ -e "$taken" ]; then
+              systemctl --no-block reboot
+            else
+              restore_desktop
+            fi
             ;;
         esac
         exit 0

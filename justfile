@@ -390,6 +390,9 @@ vm-usb:
 vm-setup:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Relink the libvirt hooks (GPU passthrough) after a config change; a
+    # rebuild alone doesn't, and without them `just windows` black-screens.
+    sudo systemctl restart libvirtd-config.service libvirtd.service
     sudo virsh net-autostart default
     sudo virsh net-start default 2>/dev/null || true
     for name in win11-lite win11; do
