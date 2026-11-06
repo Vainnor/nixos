@@ -12,6 +12,3 @@ Things decided but not done yet, or that need the real hardware first.
 - [ ] Add the two scrape targets to the homelab Prometheus (README, Monitoring).
 - [ ] Add `meta.signingKey` to GitHub as a signing key; make sure the key is in 1Password.
 - [ ] RustDesk: check whether incoming sessions work on Mango. If they don't, Sunshine or SSH covers it.
-
-## Repo
-- [ ] GitHub repo setting: *Settings > Actions > General > Workflow permissions* → allow GitHub Actions to create pull requests (the weekly update needs it).
