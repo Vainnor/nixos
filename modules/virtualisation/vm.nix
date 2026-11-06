@@ -12,6 +12,15 @@
 #   Disk: a raw image on a no-copy-on-write folder, or (meta.vfio.windowsNvme)
 #   the whole Windows NVMe so the VM boots your real Windows install.
 #
+# "win11-lite" is a second, everyday Windows VM for light Windows-only apps:
+#   `just windows-lite` opens it in a window on your Linux desktop. No GPU
+#   passthrough, 4 cores / 8 threads (half the CPU, shared with Linux), 8 GB
+#   RAM, its own disk. Graphics are a virtio display, with Windows' built-in
+#   software renderer handling Direct3D: fine for office tools, utilities and
+#   2D apps; not for games or heavy 3D. Clipboard sharing and auto-resize come
+#   from the SPICE guest tools (install from https://www.spice-space.org/download.html).
+#   It's always available; it doesn't need meta.vfio.
+#
 # Games with kernel anti-cheat (Valorant, many shooters) refuse VMs: boot
 # Windows natively for those (F11 or the power menu's "Reboot to Windows").
 { config, ... }:
@@ -49,30 +58,68 @@ in
             ]) (lib.range 1 7)
           );
 
+      imagesDir = "/var/lib/libvirt/images";
+      installMedia = ''
+        <disk type="file" device="cdrom">
+          <driver name="qemu" type="raw"/>
+          <source file="${imagesDir}/Win11.iso"/>
+          <target dev="sdb" bus="sata"/>
+          <readonly/>
+          <boot order="2"/>
+        </disk>
+        <disk type="file" device="cdrom">
+          <driver name="qemu" type="raw"/>
+          <source file="${imagesDir}/virtio-win.iso"/>
+          <target dev="sdc" bus="sata"/>
+          <readonly/>
+        </disk>'';
+      imageDisk = name: ''
+        <disk type="file" device="disk">
+          <driver name="qemu" type="raw" cache="none" io="native" discard="unmap"/>
+          <source file="${imagesDir}/${name}.img"/>
+          <target dev="sda" bus="scsi"/>
+          <boot order="1"/>
+        </disk>'';
+
+      # Shared by both Windows VMs: UEFI with Secure Boot, Hyper-V enlightenments, clock.
+      firmware = ''
+        <os firmware="efi">
+          <type arch="x86_64" machine="q35">hvm</type>
+          <firmware>
+            <feature enabled="yes" name="secure-boot"/>
+            <feature enabled="yes" name="enrolled-keys"/>
+          </firmware>
+        </os>
+        <features>
+          <acpi/><apic/>
+          <hyperv mode="custom">
+            <relaxed state="on"/><vapic state="on"/><spinlocks state="on" retries="8191"/>
+            <vpindex state="on"/><runtime state="on"/><synic state="on"/>
+            <stimer state="on"/><reset state="on"/><frequencies state="on"/>
+            <tlbflush state="on"/><ipi state="on"/>
+          </hyperv>
+          <smm state="on"/>
+        </features>
+        <clock offset="localtime">
+          <timer name="rtc" tickpolicy="catchup"/>
+          <timer name="pit" tickpolicy="delay"/>
+          <timer name="hpet" present="no"/>
+          <timer name="hypervclock" present="yes"/>
+        </clock>
+        <pm><suspend-to-mem enabled="no"/><suspend-to-disk enabled="no"/></pm>'';
+      commonDevices = ''
+        <controller type="scsi" model="virtio-scsi"/>
+        <interface type="network">
+          <source network="default"/>
+          <model type="virtio"/>
+        </interface>
+        <tpm model="tpm-crb"><backend type="emulator" version="2.0"/></tpm>'';
+
       disk =
         if vfio.windowsNvme or null != null then
           hostdev vfio.windowsNvme
         else
-          ''
-            <disk type="file" device="disk">
-              <driver name="qemu" type="raw" cache="none" io="native" discard="unmap"/>
-              <source file="/var/lib/libvirt/images/${vmName}.img"/>
-              <target dev="sda" bus="scsi"/>
-              <boot order="1"/>
-            </disk>
-            <disk type="file" device="cdrom">
-              <driver name="qemu" type="raw"/>
-              <source file="/var/lib/libvirt/images/Win11.iso"/>
-              <target dev="sdb" bus="sata"/>
-              <readonly/>
-              <boot order="2"/>
-            </disk>
-            <disk type="file" device="cdrom">
-              <driver name="qemu" type="raw"/>
-              <source file="/var/lib/libvirt/images/virtio-win.iso"/>
-              <target dev="sdc" bus="sata"/>
-              <readonly/>
-            </disk>'';
+          imageDisk vmName + installMedia;
 
       domainXml = pkgs.writeText "${vmName}.xml" ''
         <domain type="kvm">
@@ -84,48 +131,54 @@ in
             ${vcpupins}
             <emulatorpin cpuset="0,8"/>
           </cputune>
-          <os firmware="efi">
-            <type arch="x86_64" machine="q35">hvm</type>
-            <firmware>
-              <feature enabled="yes" name="secure-boot"/>
-              <feature enabled="yes" name="enrolled-keys"/>
-            </firmware>
-          </os>
-          <features>
-            <acpi/><apic/>
-            <hyperv mode="custom">
-              <relaxed state="on"/><vapic state="on"/><spinlocks state="on" retries="8191"/>
-              <vpindex state="on"/><runtime state="on"/><synic state="on"/>
-              <stimer state="on"/><reset state="on"/><frequencies state="on"/>
-              <tlbflush state="on"/><ipi state="on"/>
-            </hyperv>
-            <smm state="on"/>
-          </features>
+          ${firmware}
           <cpu mode="host-passthrough" check="none" migratable="off">
             <topology sockets="1" dies="1" clusters="1" cores="7" threads="2"/>
             <cache mode="passthrough"/>
             <feature policy="require" name="topoext"/>
           </cpu>
-          <clock offset="localtime">
-            <timer name="rtc" tickpolicy="catchup"/>
-            <timer name="pit" tickpolicy="delay"/>
-            <timer name="hpet" present="no"/>
-            <timer name="hypervclock" present="yes"/>
-          </clock>
-          <pm><suspend-to-mem enabled="no"/><suspend-to-disk enabled="no"/></pm>
           <devices>
-            <controller type="scsi" model="virtio-scsi"/>
+            ${commonDevices}
             ${disk}
-            <interface type="network">
-              <source network="default"/>
-              <model type="virtio"/>
-            </interface>
-            <tpm model="tpm-crb"><backend type="emulator" version="2.0"/></tpm>
             ${hostdev vfio.gpu}
             ${hostdev vfio.gpuAudio}
             ${lib.concatMapStrings usbdev (vfio.usb or [ ])}
             <video><model type="none"/></video>
             <memballoon model="none"/>
+          </devices>
+        </domain>
+      '';
+
+      liteName = "win11-lite";
+      liteXml = pkgs.writeText "${liteName}.xml" ''
+        <domain type="kvm">
+          <name>${liteName}</name>
+          <memory unit="GiB">8</memory>
+          <vcpu placement="static">8</vcpu>
+          ${firmware}
+          <cpu mode="host-passthrough" check="none" migratable="off">
+            <topology sockets="1" dies="1" clusters="1" cores="4" threads="2"/>
+            <cache mode="passthrough"/>
+            <feature policy="require" name="topoext"/>
+          </cpu>
+          <devices>
+            ${commonDevices}
+            ${imageDisk liteName}
+            ${installMedia}
+            <video><model type="virtio" heads="1" primary="yes"/></video>
+            <graphics type="spice" autoport="yes">
+              <listen type="none"/>
+              <image compression="off"/>
+            </graphics>
+            <channel type="spicevmc"><target type="virtio" name="com.redhat.spice.0"/></channel>
+            <channel type="unix"><target type="virtio" name="org.qemu.guest_agent.0"/></channel>
+            <input type="tablet" bus="usb"/>
+            <sound model="ich9"><audio id="1"/></sound>
+            <audio id="1" type="spice"/>
+            <redirdev bus="usb" type="spicevmc"/>
+            <redirdev bus="usb" type="spicevmc"/>
+            <controller type="usb" model="qemu-xhci" ports="15"/>
+            <memballoon model="virtio"/>
           </devices>
         </domain>
       '';
@@ -164,6 +217,7 @@ in
         pciutils # lspci
         usbutils # lsusb
         qemu-utils # qemu-img
+        virt-viewer # window for win11-lite
       ];
       users.users.${meta.username}.extraGroups = [
         "libvirtd"
@@ -177,7 +231,10 @@ in
       ];
       boot.extraModprobeConfig = "options kvm ignore_msrs=1 report_ignored_msrs=0";
 
-      environment.etc = lib.mkIf (vfio != null) { "libvirt-templates/${vmName}.xml".source = domainXml; };
+      environment.etc = {
+        "libvirt-templates/${liteName}.xml".source = liteXml;
+      }
+      // lib.optionalAttrs (vfio != null) { "libvirt-templates/${vmName}.xml".source = domainXml; };
 
       preservation.preserveAt."/persistent".directories = [ "/var/lib/libvirt" ];
       # VM disk images are rewritten in place; copy-on-write would fragment them.

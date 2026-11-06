@@ -80,6 +80,15 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
    The first time, install Windows and load the virtio drivers from the second CD drive.
    To boot your existing Windows install instead, set `meta.vfio.windowsNvme` to its NVMe's PCI address. Windows may then ask you to re-activate.
 
+### Light Windows VM (no GPU passthrough)
+`win11-lite` is for small Windows-only apps. It runs in a window on your Linux desktop and uses 4 cores / 8 threads and 8 GB of RAM. Graphics are a basic virtual display, so it handles office tools and 2D apps but not games.
+1. Run `just vm-setup` (once), `just vm-virtio` and `just vm-disk win11-lite 80G`.
+2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`, then run `just windows-lite`.
+3. Install Windows, loading the storage driver from the virtio CD.
+4. Inside Windows, install `virtio-win-guest-tools.exe` from the same CD and the [SPICE guest tools](https://www.spice-space.org/download.html). They give you shared clipboard, auto-resize and a proper display driver.
+
+`just windows-lite-stop` shuts it down. The two Windows VMs have separate disks, so they don't affect each other.
+
 Games with kernel anti-cheat refuse to run in VMs. For those, boot Windows natively: use the power menu's **Reboot to Windows**, or press F11 at boot.
 
 ## Day to day

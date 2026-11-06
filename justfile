@@ -150,15 +150,16 @@ vm-gpu:
 vm-usb:
     lsusb
 
-# One-time: start libvirt's default network and define the Windows VM
+# One-time: start libvirt's default network and define the Windows VMs
 vm-setup:
     sudo virsh net-autostart default
     sudo virsh net-start default || true
-    sudo virsh define /etc/libvirt-templates/win11.xml
+    sudo virsh define /etc/libvirt-templates/win11-lite.xml
+    if [ -e /etc/libvirt-templates/win11.xml ]; then sudo virsh define /etc/libvirt-templates/win11.xml; fi
 
-# Create the Windows VM disk image (sparse), e.g. `just vm-disk 250G`
-vm-disk size="250G":
-    sudo qemu-img create -f raw /var/lib/libvirt/images/win11.img {{ size }}
+# Create a VM disk image (sparse): `just vm-disk win11-lite 80G`, `just vm-disk win11 250G`
+vm-disk name="win11-lite" size="80G":
+    sudo qemu-img create -f raw /var/lib/libvirt/images/{{ name }}.img {{ size }}
 
 # Download the virtio drivers ISO; put your Windows 11 ISO at /var/lib/libvirt/images/Win11.iso
 vm-virtio:
@@ -167,6 +168,15 @@ vm-virtio:
 # Start Windows with the GPU (your Linux session closes until Windows shuts down)
 windows:
     sudo virsh start win11
+
+# Open the light Windows VM in a window (half the CPU, no GPU passthrough)
+windows-lite:
+    virsh -c qemu:///system domstate win11-lite | grep -q running || virsh -c qemu:///system start win11-lite
+    virt-viewer -c qemu:///system --attach --wait win11-lite &
+
+# Shut the light Windows VM down cleanly
+windows-lite-stop:
+    virsh -c qemu:///system shutdown win11-lite
 
 # ── Impermanence helpers ───────────────────────────────────────────────
 
