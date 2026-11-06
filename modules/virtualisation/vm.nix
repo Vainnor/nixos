@@ -256,7 +256,22 @@ in
         vfio.gpuAudio
       ]
       ++ lib.optional (vfio.windowsNvme or null != null) vfio.windowsNvme;
-      reserve = vfio != null && vfio.reserveIds or null != null;
+      reserve = vfio != null && vfio.reserveGpu or false;
+      used = "/run/${vmName}-gpu-used";
+      # Runs instead of `modprobe amdgpu` (amdgpu loads for the CPU's
+      # graphics): before amdgpu can grab the 7900 XTX, shrink its BAR to 8 GB
+      # (Windows gives code 43 with the full 32 GB, and the size can't change
+      # once a driver holds the card) and give it to vfio-pci.
+      claimGpu = pkgs.writeShellScript "claim-gpu-for-vfio" ''
+        d=/sys/bus/pci/devices/${vfio.gpu}
+        if [ ! -e "$d/driver" ]; then
+          echo 13 > "$d/resource0_resize" 2>/dev/null || true
+          echo vfio-pci > "$d/driver_override"
+          ${pkgs.kmod}/bin/modprobe vfio-pci
+          echo ${vfio.gpu} > /sys/bus/pci/drivers_probe
+        fi
+        exec ${pkgs.kmod}/bin/modprobe --ignore-install amdgpu "$@"
+      '';
       # Lend the reserved card to Linux until the next reboot (for games or
       # anything heavy on the Linux side). The gaming VM can still take it
       # after that, but then the PC reboots when Windows shuts down.
@@ -266,14 +281,23 @@ in
           echo "${vmName} is using the card; shut Windows down first." >&2
           exit 1
         fi
+        # Unbinding the card from vfio-pci after a VM used it crashes the
+        # kernel (see below); a fresh boot is the only clean way back.
+        if [ -e ${used} ]; then
+          echo "Windows used the card since boot; reboot first, then run gpu-linux." >&2
+          exit 1
+        fi
         for d in ${vfio.gpuAudio} ${vfio.gpu}; do
           p=/sys/bus/pci/devices/$d
           [ "$(basename "$(readlink "$p/driver" 2>/dev/null)")" = vfio-pci ] || continue
           echo "Handing $d to Linux"
-          sudo sh -c "echo > $p/driver_override; echo $d > /sys/bus/pci/drivers/vfio-pci/unbind; echo $d > /sys/bus/pci/drivers_probe"
+          sudo sh -c "echo > $p/driver_override; echo $d > /sys/bus/pci/drivers/vfio-pci/unbind"
+          # Full 32 GB BAR again for Linux (resizable BAR).
+          [ "$d" = ${vfio.gpu} ] && sudo sh -c "echo 15 > $p/resource0_resize" 2>/dev/null || true
+          sudo sh -c "echo $d > /sys/bus/pci/drivers_probe"
         done
         sudo systemctl restart lactd.service
-        echo "Done. The card is Linux's until you reboot; plug a monitor into it to use it as a screen."
+        echo "Done. The card is Linux's until you reboot."
       '';
       hook = pkgs.writeShellScript "gpu-passthrough-hook" ''
         set -u
@@ -320,7 +344,8 @@ in
               exit 1
             fi
             modprobe vfio-pci
-            # Card reserved from boot (meta.vfio.reserveIds): the desktop runs
+            touch ${used}
+            # Card reserved from boot (meta.vfio.reserveGpu): the desktop runs
             # on the CPU's graphics and stays up. Otherwise take the card from
             # Linux, which means stopping the desktop on it.
             if [ "$(basename "$(readlink /sys/bus/pci/devices/${vfio.gpu}/driver 2>/dev/null)")" != vfio-pci ]; then
@@ -379,22 +404,18 @@ in
         "amd_iommu=on"
         "iommu=pt"
       ]
-      ++ lib.optional reserve "vfio-pci.ids=${vfio.reserveIds}";
+      ++ lib.optional reserve "vfio-pci.ids=${vfio.gpuAudioId}"; # the card's audio, before the sound driver
       boot.extraModprobeConfig = ''
         options kvm ignore_msrs=1 report_ignored_msrs=0
       ''
       + lib.optionalString reserve ''
-        softdep amdgpu pre: vfio-pci
+        install amdgpu ${claimGpu} $CMDLINE_OPTS
       '';
-      # vfio-pci has to claim the card before amdgpu (loaded in the initrd for
-      # the boot splash) gets to it.
-      boot.initrd.kernelModules = lib.mkIf reserve (
-        lib.mkBefore [
-          "vfio_pci"
-          "vfio"
-          "vfio_iommu_type1"
-        ]
-      );
+      boot.initrd.kernelModules = lib.mkIf reserve [
+        "vfio_pci"
+        "vfio"
+        "vfio_iommu_type1"
+      ];
 
       environment.etc = {
         "libvirt-templates/${liteName}.xml".source = liteXml;
