@@ -1,31 +1,89 @@
-# nixos
+<p align="center">
+  <img src="assets/readme/banner.svg" alt="vainnor/nixos: one flake for the PC and the Mac, installed with one command" width="100%">
+</p>
 
-NixOS for **arc** (Ryzen 7 9800X3D · RX 7900 XTX · 32 GB), dual-booting with Windows on a separate drive,
-plus the MacBook through nix-darwin (same shell, git and theme).
-Mango (Wayland) · Ghostty · fuzzel · waybar · LibreWolf · Stylix theming · LUKS + btrfs.
-Open items are in [TODO.md](TODO.md).
+<p align="center">
+  <a href="https://github.com/Vainnor/nixos/actions/workflows/secrets.yml"><img alt="secrets" src="https://github.com/Vainnor/nixos/actions/workflows/secrets.yml/badge.svg?branch=main"></a>
+  <img alt="NixOS: 26.11" src="https://img.shields.io/badge/NixOS-26.11-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> <img alt="nix-darwin: Mac" src="https://img.shields.io/badge/nix--darwin-Mac-B5A8F5?style=flat-square&labelColor=1D232E&logo=apple&logoColor=F5F7FB"> <img alt="theme: catppuccin mocha" src="https://img.shields.io/badge/theme-catppuccin%20mocha-243142?style=flat-square&labelColor=1D232E">
+</p>
+<p align="center">
+  <img alt="aspects: 7" src="https://img.shields.io/badge/aspects-7-B5A8F5?style=flat-square&labelColor=1D232E"> <img alt="modules: 60" src="https://img.shields.io/badge/modules-60-B5A8F5?style=flat-square&labelColor=1D232E"> <a href="TODO.md"><img alt="read: the todo list" src="https://img.shields.io/badge/read-the%20todo%20list-243142?style=flat-square&labelColor=1D232E"></a>
+</p>
 
-## Layout (dendritic)
+---
 
-Every `.nix` file under `modules/` is a flake-parts module, loaded automatically by import-tree.
-Files are organized by **feature**, and one file can hold both the NixOS and home-manager halves
-of that feature (`flake.modules.nixos.<aspect>` / `flake.modules.homeManager.<aspect>`).
-Files and folders whose path contains `/_` (for example `hosts/arc/_disko.nix`) are not auto-loaded.
+NixOS for **arc** (Ryzen 7 9800X3D · RX 7900 XTX · 32 GB), dual-booting with Windows on its own
+drive, plus the MacBook through nix-darwin. **One flake describes both, and one command installs the PC.**
+The layout is [dendritic](https://vimjoyer.com/nix/dendritic/): every file under `modules/` is a
+flake-parts module for one feature, holding its NixOS and home-manager halves side by side. A machine
+is just the list of aspects it picks.
 
-| Aspect    | What's in it                                                                   |
-|-----------|--------------------------------------------------------------------------------|
-| `base`    | nix, boot, security, networking + NetBird, SSH (NetBird only), user, shell, backups, USBGuard, monitoring |
-| `desktop` | mango, greetd, waybar, fuzzel, swaync, swayosd, swaylock, Plymouth, audio, theme, 1Password, apps |
-| `gaming`  | Steam + Proton-GE, gamescope, gamemode, MangoHud, amdgpu/LACT, instant replay, Sunshine, scx_lavd, controllers |
-| `dev`     | Zed, vis, git, direnv, nix-ld, rootless Docker                                 |
-| `privacy` | i2pd                                                                           |
-| `vm`      | libvirt + virt-manager, Windows 11 VM with the 7900 XTX passed through          |
-| `streaming` | OBS with the Vainnor overlays (`assets/overlays`), 3 theme scene collections, BEACN-style tracks, OBS hotkeys, mic chain |
+<p align="center">
+  <img src="assets/readme/architecture.svg" alt="Flake inputs feed the modules directory, where seven aspects (base, desktop, gaming, streaming, dev, vm, privacy) and meta.nix live. arc, the Mac and the installer pick from them. arc's drive is LUKS2 with btrfs subvolumes, and / is a tmpfs wiped every boot." width="100%">
+</p>
 
-The Mac (`hosts/mac`) uses the `darwin.base` aspect, which brings in the home-manager `base` and `dev` halves only.
+## What's in it
 
-`modules/hosts/arc/default.nix` picks the aspects for this machine. Shared values (username,
-theme, time zone, SSH keys) live in `modules/flake/meta.nix`. **Change `theme` there to re-theme everything.**
+| Aspect | What you get |
+|---|---|
+| `base` | systemd-boot via lanzaboote, LUKS + TPM, impermanence, NetBird, SSH (NetBird only), sops, fish, hourly snapshots, restic, USBGuard, Prometheus exporters |
+| `desktop` | Mango, greetd, waybar, fuzzel (apps, emoji, calculator, files), swaync, swayosd, swaylock, Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
+| `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT, instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
+| `streaming` | OBS seeded with the Vainnor overlays: a profile, 3 themed scene collections, BEACN-style audio tracks, global hotkeys, an EasyEffects mic chain, Chatterino |
+| `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, Rust, rootless Docker |
+| `vm` | libvirt: `win11` with the 7900 XTX passed through, `win11-lite` in a window, WinApps |
+| `privacy` | i2pd, and a LibreWolf profile that only talks through it |
+
+Shared values (user, theme, wallpaper, monitors, audio output, VFIO addresses) live in
+`modules/flake/meta.nix`. **Change `theme` there and everything re-themes.**
+
+## Built with
+
+Versions are the ones pinned in `flake.lock` today; `just update` moves them.
+
+| Layer | Tool | Version |
+|---|---|---|
+| **System** | <img alt="NixOS: 26.11 unstable" src="https://img.shields.io/badge/NixOS-26.11%20unstable-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> | `26.11 unstable` |
+|  | <img alt="Linux: 7.3.1" src="https://img.shields.io/badge/Linux-7.3.1-B5A8F5?style=flat-square&labelColor=1D232E&logo=linux&logoColor=F5F7FB"> | `7.3.1` |
+|  | <img alt="Nix: 2.34.9" src="https://img.shields.io/badge/Nix-2.34.9-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> | `2.34.9` |
+| **Flake** | <img alt="flake-parts: dendritic" src="https://img.shields.io/badge/flake--parts-dendritic-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="home-manager: unstable" src="https://img.shields.io/badge/home--manager-unstable-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="nix-darwin: Mac" src="https://img.shields.io/badge/nix--darwin-Mac-243142?style=flat-square&labelColor=1D232E&logo=apple&logoColor=F5F7FB"> |  |
+| **Desktop** | <img alt="Mango: nightly" src="https://img.shields.io/badge/Mango-nightly-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="Ghostty: 1.4.0" src="https://img.shields.io/badge/Ghostty-1.4.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.4.0` |
+|  | <img alt="LibreWolf: 159.0" src="https://img.shields.io/badge/LibreWolf-159.0-B5A8F5?style=flat-square&labelColor=1D232E&logo=librewolf&logoColor=F5F7FB"> | `159.0` |
+|  | <img alt="fuzzel: 1.15.0" src="https://img.shields.io/badge/fuzzel-1.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.15.0` |
+|  | <img alt="Waybar: 0.15.0" src="https://img.shields.io/badge/Waybar-0.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.15.0` |
+|  | <img alt="Stylix: catppuccin mocha" src="https://img.shields.io/badge/Stylix-catppuccin%20mocha-243142?style=flat-square&labelColor=1D232E"> |  |
+| **Graphics** | <img alt="Mesa RADV: 26.2.6" src="https://img.shields.io/badge/Mesa%20RADV-26.2.6-B5A8F5?style=flat-square&labelColor=1D232E&logo=amd&logoColor=F5F7FB"> | `26.2.6` |
+|  | <img alt="PipeWire: 1.6.9" src="https://img.shields.io/badge/PipeWire-1.6.9-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.6.9` |
+| **Gaming** | <img alt="Steam: Proton GE 11-11" src="https://img.shields.io/badge/Steam-Proton%20GE%2011--11-B5A8F5?style=flat-square&labelColor=1D232E&logo=steam&logoColor=F5F7FB"> | `Proton GE 11-11` |
+|  | <img alt="gamescope: 3.17.0" src="https://img.shields.io/badge/gamescope-3.17.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `3.17.0` |
+|  | <img alt="Sunshine: 2026.914" src="https://img.shields.io/badge/Sunshine-2026.914-B5A8F5?style=flat-square&labelColor=1D232E"> | `2026.914` |
+|  | <img alt="scx_lavd: 1.1.4" src="https://img.shields.io/badge/scx__lavd-1.1.4-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.1.4` |
+|  | <img alt="gpu-screen-recorder: 6.1.6" src="https://img.shields.io/badge/gpu--screen--recorder-6.1.6-B5A8F5?style=flat-square&labelColor=1D232E"> | `6.1.6` |
+| **Streaming** | <img alt="OBS Studio: 32.2.2" src="https://img.shields.io/badge/OBS%20Studio-32.2.2-B5A8F5?style=flat-square&labelColor=1D232E&logo=obsstudio&logoColor=F5F7FB"> | `32.2.2` |
+| **Dev** | <img alt="Zed: 1.26.2" src="https://img.shields.io/badge/Zed-1.26.2-B5A8F5?style=flat-square&labelColor=1D232E&logo=zedindustries&logoColor=F5F7FB"> | `1.26.2` |
+|  | <img alt="vis: in use" src="https://img.shields.io/badge/vis-in%20use-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="Docker: rootless" src="https://img.shields.io/badge/Docker-rootless-243142?style=flat-square&labelColor=1D232E&logo=docker&logoColor=F5F7FB"> |  |
+| **Security** | <img alt="lanzaboote: 1.2.0" src="https://img.shields.io/badge/lanzaboote-1.2.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.2.0` |
+|  | <img alt="LUKS2: TPM unlock" src="https://img.shields.io/badge/LUKS2-TPM%20unlock-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="sops + age: 3.13.3" src="https://img.shields.io/badge/sops%20%2B%20age-3.13.3-B5A8F5?style=flat-square&labelColor=1D232E"> | `3.13.3` |
+|  | <img alt="1Password: SSH agent" src="https://img.shields.io/badge/1Password-SSH%20agent-243142?style=flat-square&labelColor=1D232E&logo=1password&logoColor=F5F7FB"> |  |
+|  | <img alt="USBGuard: in use" src="https://img.shields.io/badge/USBGuard-in%20use-243142?style=flat-square&labelColor=1D232E"> |  |
+| **Network** | <img alt="NetBird: 0.82.0" src="https://img.shields.io/badge/NetBird-0.82.0-B5A8F5?style=flat-square&labelColor=1D232E&logo=wireguard&logoColor=F5F7FB"> | `0.82.0` |
+|  | <img alt="i2pd: in use" src="https://img.shields.io/badge/i2pd-in%20use-243142?style=flat-square&labelColor=1D232E"> |  |
+| **Backups** | <img alt="btrbk: 0.32.7" src="https://img.shields.io/badge/btrbk-0.32.7-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.32.7` |
+|  | <img alt="restic: 0.19.1" src="https://img.shields.io/badge/restic-0.19.1-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.19.1` |
+
+## Three things to know before changing anything
+
+1. **The installer only ever erases one disk.** It finds the Crucial P310 by model, refuses anything with
+   Windows or NTFS on it, and waits for you to type `YES`. The Windows drives are never named anywhere.
+2. **`/` is wiped on every boot.** Anything not declared here or listed in
+   `modules/system/impermanence.nix` is gone after a reboot. `just ephemeral` shows what would be lost.
+3. **The repo is public; secrets are not.** They're sops-encrypted in `secrets/`, and CI fails on anything
+   that looks like a leaked credential. The Mac's age key is the one thing this repo can't rebuild.
 
 ## Install
 
@@ -65,13 +123,19 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 
 ## After installing (once)
 
-### Secure Boot + TPM unlock
+<details>
+<summary><b>Secure Boot + TPM unlock</b></summary>
+
 1. On first boot, your own Secure Boot keys are created in `/var/lib/sbctl` (kept on `/persistent`).
 2. Reboot into the BIOS. Go to *Security > Secure Boot*, set the mode to **Custom**, then **delete all keys** (this is Setup Mode). Save and reboot. systemd-boot enrolls your keys plus Microsoft's; Windows and the GPU's option ROM need Microsoft's.
 3. Back in the BIOS, turn Secure Boot **on**. Then run `just secureboot-status`. It should show *Secure Boot: enabled*.
 4. Run `just tpm-enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
 
-### Secrets (sops)
+</details>
+
+<details>
+<summary><b>Secrets (sops)</b></summary>
+
 `secrets/secrets.yaml` is encrypted (it holds the Twitch stream key and the StreamElements ID and token). Only the recipients in `.sops.yaml` can open it.
 1. The installer prints the PC's age key, and also saves it in `~/nixos/HOST_AGE_KEY.txt`. `just secrets-host` shows it again.
 2. On the Mac, run `just secrets-add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
@@ -79,30 +143,58 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 
 What's in there: the Twitch key and StreamElements token, the WinApps password, your Wi-Fi (`wifi/ssid`, `wifi/psk`), a NetBird setup key (`netbird/setup_key`, so the PC joins the mesh by itself) and the restic target (see Backups).
 
-### 1Password
+</details>
+
+<details>
+<summary><b>1Password</b></summary>
+
 Sign in once, then in *Settings > Developer* turn on **Use the SSH agent** and **Integrate with 1Password CLI**. SSH and git signing then go through 1Password, and the LibreWolf extension connects to the app. Commits are signed with `meta.signingKey`; add it on GitHub as a **signing key** so they show as Verified. The key has to be in your 1Password vault, otherwise `git commit` fails.
 
-### Backups
+</details>
+
+<details>
+<summary><b>Backups</b></summary>
+
 - **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `just snapshots` lists them; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
 - **restic to the homelab**: put the repository URL, a password and (for S3/MinIO) keys in `restic/*` with `just secrets-edit`, then set `meta.resticReady = true` and deploy. It runs nightly at 03:30 (or at the next boot if the PC was off). `just backup` runs it now, `just restore <path>` gets files back.
 
-### Monitoring
+</details>
+
+<details>
+<summary><b>Monitoring</b></summary>
+
 Add `arc.netbird.cloud:9100` (node exporter) and `arc.netbird.cloud:9633` (SMART) as scrape targets in the homelab's Prometheus. Both ports are only open on NetBird.
 
-### Sunshine (game streaming)
+</details>
+
+<details>
+<summary><b>Sunshine (game streaming)</b></summary>
+
 Open `https://localhost:47990` on the PC, create the admin login, then pair Moonlight (Mac, phone, TV) with the PIN it shows. Works over NetBird when you're away.
 
-### USB devices
+</details>
+
+<details>
+<summary><b>USB devices</b></summary>
+
 Devices that are plugged in at boot always work, and everything connected on the first boot is remembered. A new device plugged in later is blocked and a notification says so: `just usb` shows it, `just usb-allow <n>` allows it for good.
 
-### Windows VM with the GPU
+</details>
+
+<details>
+<summary><b>Windows VM with the GPU</b></summary>
+
 1. Run `just vm-gpu` and `just vm-usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `just switch`.
 2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`. Then run `just vm-virtio`, `just vm-disk 250G` and `just vm-setup`.
 3. `just windows` starts the VM. Your Linux session closes, and Windows takes over the monitors at near-native speed. When you shut Windows down, you're back at the Linux login.
    The first time, install Windows and load the virtio drivers from the second CD drive.
    To boot your existing Windows install instead, set `meta.vfio.windowsNvme` to its NVMe's PCI address. Windows may then ask you to re-activate.
 
-### Light Windows VM (no GPU passthrough)
+</details>
+
+<details>
+<summary><b>Light Windows VM (no GPU passthrough)</b></summary>
+
 `win11-lite` is for small Windows-only apps. It runs in a window on your Linux desktop and uses 4 cores / 8 threads and 8 GB of RAM. Graphics are a basic virtual display, so it handles office tools and 2D apps but not games.
 1. Run `just vm-setup` (once), `just vm-virtio` and `just vm-disk win11-lite 80G`.
 2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`, then run `just windows-lite`.
@@ -111,7 +203,11 @@ Devices that are plugged in at boot always work, and everything connected on the
 
 `just windows-lite-stop` shuts it down. The two Windows VMs have separate disks, so they don't affect each other.
 
-### WinApps (Windows apps as Linux windows)
+</details>
+
+<details>
+<summary><b>WinApps (Windows apps as Linux windows)</b></summary>
+
 WinApps runs apps from `win11-lite` as separate windows on your desktop (over RDP RemoteApp). They appear in fuzzel like normal apps.
 1. Use **Windows 11 Pro** in `win11-lite`; Home has no RDP. Log in to the account named in `meta.windowsUser` with a **password**, not a PIN.
 2. In the VM, open the **WINAPPS** CD, right-click `install.bat`, choose *Run as administrator*, then reboot the VM.
@@ -121,6 +217,8 @@ WinApps runs apps from `win11-lite` as separate windows on your desktop (over RD
 Your Linux home folder shows up in Windows as `\\tsclient\home`. The VM pauses itself after 5 idle minutes.
 
 Games with kernel anti-cheat refuse to run in VMs. For those, boot Windows natively: use the power menu's **Reboot to Windows**, or press F11 at boot.
+
+</details>
 
 ## Day to day
 
@@ -151,6 +249,7 @@ Run `just` to see all recipes. The common ones:
 | `just mac` / `just mac-build` | Switch / build the Mac (nix-darwin) |
 
 ### Keys worth knowing
+
 | Keys | What it does |
 |---|---|
 | Super+Space · Super+; · Super+C · Super+/ | Apps · emoji · calculator · find a file |
@@ -161,6 +260,7 @@ Run `just` to see all recipes. The common ones:
 | Super+F9 · Super+F10 · Super+Shift+F12 | OBS: record on/off · mic mute · **stream** on/off |
 
 ## The Mac
+
 nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with signing, direnv, vis and the Stylix theme. It leaves apps, Homebrew, Zed's settings, `~/.ssh/config` and your `starship.toml` alone. Files it takes over (like `~/.config/fish/config.fish`) are kept next to it as `*.hm-backup`.
 
 First time:
@@ -180,4 +280,23 @@ Mono and Horror are under *Scene Collection*. You still have to:
 
 Audio tracks: 1 Audience (everything), 2 VOD (no music), 3 voices, 4 game + other. The stream uses Track 1, the Twitch VOD uses Track 2, and recordings get all four.
 
-`nix flake init -t ~/nixos#rust` starts a new Rust project with its own dev shell.
+## Layout
+
+| | |
+|---|---|
+| `modules/flake/` | flake plumbing: `meta.nix` (shared values), the installer, home-manager wiring, dev shell |
+| `modules/hosts/` | `arc` (picks aspects, disk layout, hardware), `mac`, the installer ISO |
+| `modules/system/` | boot, security, impermanence, networking, secrets, backups, audio, USBGuard, monitoring |
+| `modules/desktop/` · `apps/` | the Mango session and the apps on it |
+| `modules/gaming/` · `streaming/` · `dev/` · `virtualisation/` · `privacy/` | one folder per aspect |
+| `secrets/` | sops-encrypted; `.sops.yaml` says who can open it |
+| `assets/` | the overlay pack and these README images |
+| `templates/rust/` | `nix flake init -t ~/nixos#rust` starts a Rust project with its own dev shell |
+
+Files and folders whose path contains `/_` (like `hosts/arc/_disko.nix`) aren't auto-loaded.
+
+## If the drive dies
+
+Snapshots live on the same disk, so they won't help. Install again (`nix run github:vainnor/nixos`),
+add the new host key with `just secrets-add-host`, then `just restore /home/vainnor` (and anything from
+`/persistent` you need) and copy it back from `/tmp/restore`. Without the Mac's age key, nothing in `secrets/` can be decrypted.
