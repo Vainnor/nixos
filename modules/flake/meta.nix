@@ -56,7 +56,7 @@
       # A virtual screen alongside the card, for installing Windows: the card
       # shows nothing until Windows has the AMD driver. Turn off afterwards
       # (games would see it as a second monitor).
-      installDisplay = true;
+      installDisplay = false; # true adds a virtual screen (VNC on :5909) for installing Windows
       # Handed to Windows while the VM runs, back to Linux after.
       usb = [
         {
