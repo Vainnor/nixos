@@ -1,6 +1,6 @@
 # ONE place for the look of everything. Change `meta.theme` (flake/meta.nix)
 # and every themed app follows: GTK/Qt, Ghostty, fuzzel, waybar, swaync,
-# swaylock, the boot splash, LibreWolf, Vesktop, Zed, btop, bat, fish, ... plus Mango and vis,
+# the lock screen, the boot splash, LibreWolf, Vesktop, Zed, btop, bat, fish, ... plus Mango and vis,
 # which read the palette below by hand because Stylix has no target for them.
 #
 # Wallpapers live in assets/wallpapers/<name>/ (wide.png for the ultrawide,

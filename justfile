@@ -99,6 +99,30 @@ mac:
 mac-build:
     {{ nix }} build {{ flake }}#darwinConfigurations.{{ mac }}.system --no-link --print-out-paths
 
+# First time only: hand apps you installed by hand over to Homebrew (so `just mac` can manage them)
+mac-adopt:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    have=$(brew list --cask -1)
+    failed=()
+    for c in $({{ nix }} eval --raw {{ flake }}#darwinConfigurations.{{ mac }}.config.homebrew.casks --apply 'cs: builtins.concatStringsSep " " (map (c: c.name) cs)'); do
+      grep -qx "${c##*/}" <<<"$have" && continue
+      echo "== $c"
+      HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask --adopt "$c" || failed+=("$c")
+    done
+    if [ ${#failed[@]} -gt 0 ]; then
+      echo "Could not adopt: ${failed[*]}"
+      echo "Usually a version mismatch: update that app (or delete it) and run this again."
+    else
+      echo "All casks are Homebrew's now. Next: just mac"
+    fi
+
+# Update Homebrew and upgrade every brew and cask (normal `just mac` doesn't)
+mac-upgrade:
+    brew update
+    brew upgrade
+    brew upgrade --cask --greedy
+
 # ── Checks ─────────────────────────────────────────────────────────────
 
 # Evaluate everything without building (works on the Mac)
