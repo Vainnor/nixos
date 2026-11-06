@@ -365,12 +365,23 @@ vm-gpu:
 vm-usb:
     lsusb
 
-# One-time: start libvirt's default network and define the Windows VMs
+# (Re)define the Windows VMs from the config and start libvirt's network (safe to rerun)
 vm-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
     sudo virsh net-autostart default
-    sudo virsh net-start default || true
-    sudo virsh define /etc/libvirt-templates/win11-lite.xml
-    if [ -e /etc/libvirt-templates/win11.xml ]; then sudo virsh define /etc/libvirt-templates/win11.xml; fi
+    sudo virsh net-start default 2>/dev/null || true
+    for name in win11-lite win11; do
+      xml=/etc/libvirt-templates/$name.xml
+      [ -e "$xml" ] || continue
+      if uuid=$(sudo virsh domuuid "$name" 2>/dev/null); then
+        sed "s|<name>$name</name>|<name>$name</name><uuid>$uuid</uuid>|" "$xml" > "/tmp/$name.xml"
+        sudo virsh define "/tmp/$name.xml"
+        rm -f "/tmp/$name.xml"
+      else
+        sudo virsh define "$xml"
+      fi
+    done
 
 # Create a VM disk image (sparse): `just vm-disk win11-lite 80G`, `just vm-disk win11 250G`
 vm-disk name="win11-lite" size="80G":

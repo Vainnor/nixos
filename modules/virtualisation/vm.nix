@@ -273,6 +273,9 @@ in
       systemd.tmpfiles.rules = [
         "v /var/lib/libvirt/images 0711 root root -"
         "h /var/lib/libvirt/images - - - - +C"
+        # swtpm signs each new VM's TPM with a local CA kept here; NixOS doesn't
+        # create it, and without it `virsh start` fails in swtpm_setup.
+        "d /var/lib/swtpm-localca 0750 tss tss -"
       ];
 
       assertions = lib.optional (vfio != null) {
