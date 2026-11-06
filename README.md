@@ -28,7 +28,7 @@ is just the list of aspects it picks.
 |---|---|
 | `base` | systemd-boot via lanzaboote, LUKS + TPM, impermanence, NetBird, SSH (NetBird only), sops, fish, hourly snapshots, restic, USBGuard, Prometheus exporters |
 | `desktop` | Mango, greetd, waybar, fuzzel (apps, emoji, calculator, files), swaync, swayosd, gtklock, Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
-| `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT, instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
+| `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT (GPU fans), CoolerControl (CPU and case fans), instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
 | `streaming` | OBS seeded with the Vainnor overlays: a profile, 3 themed scene collections, BEACN-style audio tracks, global hotkeys, an EasyEffects mic chain, Chatterino |
 | `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, kubectl, k9s, OpenTofu, Ansible, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
 | `vm` | libvirt: `win11` with the 7900 XTX passed through, `win11-lite` in a window, WinApps |
@@ -156,6 +156,16 @@ Sign in once, then in *Settings > Developer* turn on **Use the SSH agent** and *
 </details>
 
 <details>
+<summary><b>Fan curves</b></summary>
+
+Open **CoolerControl** from the launcher. Pick a fan, make a curve against a temperature (CPU, liquid, GPU), and apply it. The curves keep running after you close the app. For a quick switch, make a "quiet" and a "gaming" mode.
+- Leave the graphics card's fans to **LACT**. Giving them a curve in CoolerControl too makes the two programs fight over the fan.
+- If a case fan shows a speed but won't change, set its control mode to PWM in the BIOS (Hardware Monitor) first.
+- `just fans-save` copies your curves into the repo; commit them. A reinstall then starts with the same curves.
+
+</details>
+
+<details>
 <summary><b>Backups</b></summary>
 
 - **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `just snapshots` lists them; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
@@ -270,6 +280,7 @@ Run `just` to see all recipes. The common ones:
 | `just windows` | Start the Windows VM with the GPU passed through |
 | `just audio-devices` | List audio outputs (set the real one as `meta.audioOutput`) |
 | `just obs-reset` | Back up OBS settings and re-seed the Vainnor profile/scenes |
+| `just fans` / `just fans-save` | Temperatures and fan speeds / save the fan curves into the repo |
 | `just snapshots` / `just snapshot` | List the hourly snapshots / take one now |
 | `just backup` / `just restore <path>` | Run the restic backup now / restore a path to `/tmp/restore` |
 | `just usb` / `just usb-allow <n>` | List USB devices / allow a blocked one |

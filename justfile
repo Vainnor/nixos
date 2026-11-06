@@ -321,6 +321,22 @@ secrets-add-host key:
     sed -i.bak 's|secretsReady = false;|secretsReady = true;|' modules/flake/meta.nix && rm -f modules/flake/meta.nix.bak
     echo "Done. Review with git diff, then: just commit 'chore: add arc as a secrets recipient' && just deploy"
 
+# ── Fans (CoolerControl) ───────────────────────────────────────────────
+
+# Temperatures and fan speeds right now
+fans:
+    sensors
+
+# Copy the fan curves from CoolerControl into the repo (a fresh install starts with them)
+fans-save:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo test -f /etc/coolercontrol/config.toml || { echo "No CoolerControl config yet. Set up a curve in the app first."; exit 1; }
+    mkdir -p assets/coolercontrol
+    sudo cat /etc/coolercontrol/config.toml > assets/coolercontrol/config.toml
+    git add assets/coolercontrol/config.toml
+    echo "Saved. Commit it with: just commit \"chore(fans): save fan curves\""
+
 # ── Secure Boot + TPM ──────────────────────────────────────────────────
 
 # Show Secure Boot state and whether this boot was signed
