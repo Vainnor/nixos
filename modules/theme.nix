@@ -148,7 +148,7 @@ in
                 if [ $((w * 10 / h)) -ge 20 ]; then img=${palette.wallpapers.wide}; else img=${palette.wallpapers.uhd}; fi
                 args+=(-o "$name" -m fill -i "$img")
               done < <(wlr-randr --json | jq -r '.[] | select(.enabled) | . as $o | ($o.modes[] | select(.current)) as $m | "\($o.name) \($m.width) \($m.height)"')
-              pkill -x swaybg || true
+              pkill -x swaybg || true # one started some other way (an older login)
               if [ ''${#args[@]} -eq 0 ]; then exec swaybg -m fill -i ${palette.wallpapers.wide}; fi
               exec swaybg "''${args[@]}"
             '';
@@ -177,8 +177,20 @@ in
 
       # Wallpaper from meta.wallpaper (see flake/meta.nix): with a wallpaper
       # folder, wide screens (the ultrawide) get wide.png and the rest get 4k.png.
-      wayland.windowManager.mango.autostart_sh = ''
-        ${lib.getExe wallpaper} &
-      '';
+      # A user service, so a rebuild with a new wallpaper restarts it right away
+      # (an autostart line would only pick it up at the next login).
+      systemd.user.services.wallpaper = {
+        Unit = {
+          Description = "Wallpaper (swaybg)";
+          PartOf = [ "graphical-session.target" ];
+          After = [ "graphical-session.target" ];
+        };
+        Service = {
+          ExecStart = lib.getExe wallpaper;
+          Restart = "on-failure";
+          RestartSec = 2;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
+      };
     };
 }
