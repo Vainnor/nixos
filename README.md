@@ -104,7 +104,7 @@ The installer:
 - shows the disk and waits for you to type `YES`;
 - asks for the disk-encryption password and your login password, then installs.
 
-When it finishes, reboot. Choose the NixOS drive with F11 if Windows starts instead. Log in, then run `sudo netbird up`.
+When it finishes, reboot. Choose the NixOS drive with F11 if Windows starts instead. Log in, then run `sudo netbird up`, and `gh auth login` so `git push` works (the repo is cloned over HTTPS; choose HTTPS and "Login with a web browser").
 
 **Optional custom ISO**: the installer is preloaded, so you just run `sudo install-nixos`.
 `nix build .#nixosConfigurations.installer.config.system.build.isoImage` (on x86_64 Linux; WSL works).

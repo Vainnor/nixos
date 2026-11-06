@@ -113,7 +113,7 @@ in
 
           echo
           echo "Done. Remove the USB stick and reboot. Pick the NixOS drive with F11 if Windows starts."
-          echo "After logging in: sudo netbird up"
+          echo "After logging in: sudo netbird up, then gh auth login (so git push works)"
           echo
           echo "Secrets: on the Mac run   just secrets-add-host $AGE_KEY"
           echo "(also saved in ~/nixos/HOST_AGE_KEY.txt)"
