@@ -154,6 +154,37 @@ wallpaper name="":
     if [ "$(uname)" = Darwin ]; then just mac; else nh os switch {{ flake }}; fi
     echo "Now: $n. Commit it with: just commit 'style: wallpaper $n'"
 
+# Try a wallpaper's colours on the Mac without changing anything: a throwaway Ghostty window + the 4K image in Quick Look
+wallpaper-try name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="assets/wallpapers/{{ name }}"
+    [ -f "$d/theme.nix" ] || { echo "No wallpaper '{{ name }}'. See: just wallpapers"; exit 1; }
+    tmp=$(mktemp -d)
+    {{ nix }} eval --json --file "$d/theme.nix" scheme | python3 -c '
+    import json, sys
+    c = json.load(sys.stdin)
+    ansi = ["base00","base08","base0B","base0A","base0D","base0E","base0C","base05",
+            "base03","base08","base0B","base0A","base0D","base0E","base0C","base07"]
+    print("background = #" + c["base00"])
+    print("foreground = #" + c["base05"])
+    print("cursor-color = #" + c["base05"])
+    print("selection-background = #" + c["base02"])
+    for i, k in enumerate(ansi): print("palette = %d=#%s" % (i, c[k]))
+    print("font-family = JetBrainsMono Nerd Font\nwindow-padding-x = 8\nwindow-padding-y = 8")
+    ' > "$tmp/ghostty"
+    cat > "$tmp/demo.sh" <<'SH'
+    printf '\033[1m%s\033[0m\n\n' "$1"
+    for i in 0 1 2 3 4 5 6 7; do printf '\033[4%sm    \033[0m' "$i"; done; echo
+    for i in 0 1 2 3 4 5 6 7; do printf '\033[10%sm    \033[0m' "$i"; done; echo; echo
+    printf '\033[34maccent\033[0m  \033[31mred\033[0m  \033[32mgreen\033[0m  \033[33myellow\033[0m  \033[90mcomment\033[0m\n\n'
+    exec /bin/zsh -f
+    SH
+    echo "command = /bin/sh $tmp/demo.sh {{ name }}" >> "$tmp/ghostty"
+    /Applications/Ghostty.app/Contents/MacOS/ghostty --config-default-files=false --config-file="$tmp/ghostty" >/dev/null 2>&1 &
+    qlmanage -p "$d/4k.png" >/dev/null 2>&1 &
+    echo "Close both windows when done. Nothing on the Mac was changed."
+
 # Add a wallpaper: `just wallpaper-add forest ~/Downloads/wide.png ~/Downloads/4k.png` (makes a matching palette)
 wallpaper-add name wide uhd:
     #!/usr/bin/env bash
