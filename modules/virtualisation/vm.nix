@@ -239,7 +239,6 @@ in
             pkgs.systemd
             pkgs.psmisc
             pkgs.efibootmgr
-            pkgs.gnugrep
             pkgs.gnused
           ]
         }
@@ -282,8 +281,9 @@ in
             # Windows shut down (or failed to start). If the GPU went to the VM,
             # reboot into Linux; otherwise just bring the desktop back.
             if [ -e "$taken" ]; then
-              # The firmware's default may be Windows Boot Manager; come back to NixOS.
-              entry=$(efibootmgr | grep -i 'Linux Boot Manager' | head -1 | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/p')
+              # Come back to NixOS even if the firmware's default is Windows:
+              # boot next from the entry this boot came from.
+              entry=$(efibootmgr | sed -n 's/^BootCurrent: *\([0-9A-Fa-f]\{4\}\).*/\1/p')
               if [ -n "$entry" ]; then efibootmgr --bootnext "$entry" >/dev/null || true; fi
               systemctl --no-block reboot
             else
