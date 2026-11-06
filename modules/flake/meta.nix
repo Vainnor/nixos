@@ -48,6 +48,9 @@
     #     windowsNvme = null; }   # or the PCI address of the Windows NVMe to boot real Windows
     vfio = null;
 
+    # Your Windows account in the VMs (WinApps logs in as this; use a password, not a PIN).
+    windowsUser = "vainnor";
+
     # Public SSH keys allowed to log in (over NetBird only). Paste yours here.
     sshKeys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores vainnor@Carsons-MBP.home"

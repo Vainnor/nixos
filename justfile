@@ -174,6 +174,18 @@ windows-lite:
     virsh -c qemu:///system domstate win11-lite | grep -q running || virsh -c qemu:///system start win11-lite
     virt-viewer -c qemu:///system --attach --wait win11-lite &
 
+# WinApps: pick Windows apps to add to the app launcher (win11-lite must be running)
+winapps-setup:
+    winapps-setup --user
+
+# WinApps: add more apps after installing them in Windows
+winapps-add:
+    winapps-setup --user --add-apps
+
+# WinApps: the full Windows desktop over RDP, in a window
+winapps-desktop:
+    winapps windows
+
 # Shut the light Windows VM down cleanly
 windows-lite-stop:
     virsh -c qemu:///system shutdown win11-lite

@@ -89,6 +89,15 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 
 `just windows-lite-stop` shuts it down. The two Windows VMs have separate disks, so they don't affect each other.
 
+### WinApps (Windows apps as Linux windows)
+WinApps runs apps from `win11-lite` as separate windows on your desktop (over RDP RemoteApp). They appear in fuzzel like normal apps.
+1. Use **Windows 11 Pro** in `win11-lite`; Home has no RDP. Log in to the account named in `meta.windowsUser` with a **password**, not a PIN.
+2. In the VM, open the **WINAPPS** CD, right-click `install.bat`, choose *Run as administrator*, then reboot the VM.
+3. Set the password: run `just secrets-edit` and fill in `winapps.rdp_password`. If secrets aren't set up yet, fuzzel asks for the password instead.
+4. With the VM running, run `just winapps-setup` and pick apps. Later, `just winapps-add` adds apps you install, and `just winapps-desktop` opens the whole Windows desktop.
+
+Your Linux home folder shows up in Windows as `\\tsclient\home`. The VM pauses itself after 5 idle minutes.
+
 Games with kernel anti-cheat refuse to run in VMs. For those, boot Windows natively: use the power menu's **Reboot to Windows**, or press F11 at boot.
 
 ## Day to day

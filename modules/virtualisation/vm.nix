@@ -165,6 +165,12 @@ in
             ${commonDevices}
             ${imageDisk liteName}
             ${installMedia}
+            <disk type="file" device="cdrom">
+              <driver name="qemu" type="raw"/>
+              <source file="/etc/libvirt-templates/winapps-oem.iso"/>
+              <target dev="sdd" bus="sata"/>
+              <readonly/>
+            </disk>
             <video><model type="virtio" heads="1" primary="yes"/></video>
             <graphics type="spice" autoport="yes">
               <listen type="none"/>
