@@ -277,6 +277,11 @@ in
           if [ "$(basename "$(readlink "$d/driver" 2>/dev/null)")" = vfio-pci ]; then return 0; fi
           echo vfio-pci > "$d/driver_override"
           if [ -e "$d/driver" ]; then echo "$1" > "$d/driver/unbind"; fi
+          # Resizable BAR: the card's 32 GB BAR gives code 43 in Windows; 8 GB
+          # (2^13 MB) works. Only possible while no driver owns the card.
+          if [ -e "$d/resource0_resize" ] && [ "$1" = "${vfio.gpu}" ]; then
+            echo 13 > "$d/resource0_resize" 2>/dev/null || echo "BAR resize failed; continuing" >&2
+          fi
           echo "$1" > /sys/bus/pci/drivers_probe
         }
         restore_desktop() {
