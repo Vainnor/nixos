@@ -51,7 +51,7 @@ in
         </hostdev>'';
       usbdev = d: ''
         <hostdev mode="subsystem" type="usb" managed="yes">
-          <source><vendor id="${d.vendor}"/><product id="${d.product}"/></source>
+          <source startupPolicy="optional"><vendor id="${d.vendor}"/><product id="${d.product}"/></source>
         </hostdev>'';
 
       # vCPU pairs -> host cores 1-7 with their SMT siblings 9-15.
@@ -169,6 +169,7 @@ in
             ${disk}
             ${hostdev vfio.gpu}
             ${hostdev vfio.gpuAudio}
+            <controller type="usb" model="qemu-xhci" ports="15"/>
             ${lib.concatMapStrings usbdev (vfio.usb or [ ])}
             <video><model type="none"/></video>
             <memballoon model="none"/>
