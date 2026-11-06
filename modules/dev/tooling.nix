@@ -63,6 +63,7 @@ in
       xdg.configFile."git/allowed_signers".text = "${meta.email} ${meta.signingKey}\n";
 
       programs.gh.enable = true;
+      programs.k9s.enable = true; # Kubernetes TUI, themed by Stylix
       programs.lazygit.enable = true;
 
       programs.direnv = {
@@ -76,6 +77,11 @@ in
           hyperfine
           tokei
           uv # one-off scripts anywhere: `uv run --python 3.12 script.py` (Pythons stay in ~/.local/share/uv)
+
+          # Homelab (homelab-infra): cluster, provisioning, host config.
+          kubectl
+          opentofu
+          ansible
         ]
         # quick experiments; real projects use the flake template. The Mac has its own rustup.
         ++ lib.optional isLinux rustup;

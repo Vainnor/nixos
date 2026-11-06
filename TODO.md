@@ -11,4 +11,5 @@ Things decided but not done yet, or that need the real hardware first.
 - [ ] Fill in `wifi/*`, `netbird/setup_key` and `restic/*` with `just secrets-edit`, then turn on `meta.resticReady`.
 - [ ] Add the two scrape targets to the homelab Prometheus (README, Monitoring).
 - [ ] Add `meta.signingKey` to GitHub as a signing key; make sure the key is in 1Password.
+- [ ] Homelab binary cache: run the Attic setup on the homelab, then fill in `meta.binaryCache` and `attic/token`.
 - [ ] RustDesk: check whether incoming sessions work on Mango. If they don't, Sunshine or SSH covers it.

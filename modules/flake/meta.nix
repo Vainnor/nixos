@@ -77,5 +77,12 @@
     # restic off-site backups. Turn on once restic/* is filled in secrets.yaml
     # (`just secrets-edit`) and secretsReady is true.
     resticReady = false;
+
+    # Homelab binary cache (Attic). null = off. Fill in from the homelab, e.g.
+    #   { endpoint = "https://cache.lab.vainnor.com"; cache = "nixos";
+    #     publicKey = "nixos:AAAA..."; }
+    # Both machines then download from it; the PC also pushes what it builds
+    # (token in sops as attic/token).
+    binaryCache = null;
   };
 }

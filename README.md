@@ -30,7 +30,7 @@ is just the list of aspects it picks.
 | `desktop` | Mango, greetd, waybar, fuzzel (apps, emoji, calculator, files), swaync, swayosd, swaylock, Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
 | `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT, instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
 | `streaming` | OBS seeded with the Vainnor overlays: a profile, 3 themed scene collections, BEACN-style audio tracks, global hotkeys, an EasyEffects mic chain, Chatterino |
-| `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
+| `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, kubectl, k9s, OpenTofu, Ansible, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
 | `vm` | libvirt: `win11` with the 7900 XTX passed through, `win11-lite` in a window, WinApps |
 | `privacy` | i2pd, and a LibreWolf profile that only talks through it |
 
@@ -182,6 +182,16 @@ Devices that are plugged in at boot always work, and everything connected on the
 </details>
 
 <details>
+<summary><b>Homelab binary cache (Attic)</b></summary>
+
+Once the homelab runs Attic, put its endpoint, cache name and public key in `meta.binaryCache` and the
+push token in the secrets (`attic/token`), then deploy. Both machines download from it first, and the PC
+pushes everything it builds, so the Mac and any reinstall reuse those builds. If the homelab is down, Nix
+gives up on it after 5 seconds and carries on. `just cache-push` pushes the running system by hand.
+
+</details>
+
+<details>
 <summary><b>Windows VM with the GPU</b></summary>
 
 1. Run `just vm-gpu` and `just vm-usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `just switch`.
@@ -247,6 +257,8 @@ Run `just` to see all recipes. The common ones:
 | `just backup` / `just restore <path>` | Run the restic backup now / restore a path to `/tmp/restore` |
 | `just usb` / `just usb-allow <n>` | List USB devices / allow a blocked one |
 | `just mac` / `just mac-build` | Switch / build the Mac (nix-darwin) |
+| `just diff` / `just tree` | What changed in the last rebuild / what takes space in the system |
+| `just new <lang> <dir>` | New project with its own toolchain (see Projects) |
 
 ### Keys worth knowing
 

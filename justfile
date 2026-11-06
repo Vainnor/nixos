@@ -4,6 +4,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 host := "arc"
 mac := "Vainnors-MacBook-Pro"
+cache := "nixos"
 remote := "vainnor@arc.netbird.cloud"
 flake := justfile_directory()
 nix := "nix --extra-experimental-features 'nix-command flakes'"
@@ -95,6 +96,18 @@ fmt:
 commit message: fmt check
     git add -A
     git commit -m "{{ message }}"
+
+# What changed between the last two system generations (on the PC)
+diff:
+    nvd diff $(ls -dv /nix/var/nix/profiles/system-*-link | tail -2)
+
+# Browse what takes space in the running system
+tree:
+    nix-tree /run/current-system
+
+# Push the running system to the homelab cache now (normally automatic)
+cache-push:
+    sudo env HOME=/var/lib/attic-push attic push homelab:{{ cache }} /run/current-system
 
 # Open a REPL with the host config loaded (`config.services...`)
 repl:
