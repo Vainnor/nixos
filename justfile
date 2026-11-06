@@ -26,13 +26,15 @@ iso:
 
 # ── Preview (before installing) ────────────────────────────────────────
 
-# Boot arc's config in a VM window (any Linux with Nix; login vainnor / preview). `just preview soft` if the window stays black
-preview gpu="gl":
+# Boot arc's config in a VM window (any Linux with Nix or WSL; login vainnor / preview). `gpu=soft|gl`, auto picks soft on WSL
+preview gpu="auto":
     #!/usr/bin/env bash
     set -euo pipefail
     {{ nix }} build {{ flake }}#nixosConfigurations.{{ host }}.config.system.build.vm -o /tmp/arc-preview
     mkdir -p ~/.cache/arc-preview
-    if [ "{{ gpu }}" = soft ]; then dev="virtio-vga"; disp="gtk"; else dev="virtio-vga-gl"; disp="gtk,gl=on"; fi
+    gpu="{{ gpu }}"
+    if [ "$gpu" = auto ]; then grep -qi microsoft /proc/version && gpu=soft || gpu=gl; fi  # WSLg has no GL for QEMU
+    if [ "$gpu" = soft ]; then dev="virtio-vga"; disp="gtk"; else dev="virtio-vga-gl"; disp="gtk,gl=on"; fi
     [ -e /dev/kvm ] || echo "No /dev/kvm here: it will run, but slowly."
     NIX_DISK_IMAGE=~/.cache/arc-preview/arc.qcow2 QEMU_OPTS="-vga none -device $dev -display $disp" /tmp/arc-preview/bin/run-{{ host }}-vm
 
