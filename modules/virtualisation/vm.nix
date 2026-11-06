@@ -51,10 +51,18 @@ in
         </hostdev>'';
       # The GPU with its video BIOS from a file (meta.vfio.gpuRom): without it
       # the VM's firmware can't drive the card and the screens stay black.
+      # GPU and its audio as functions .0 and .1 of one slot, like on the real
+      # card: AMD's driver stops with code 43 when they're separate devices.
       gpuHostdev = ''
+        <controller type="pci" index="16" model="pcie-root-port"/>
         <hostdev mode="subsystem" type="pci" managed="no">
           <source>${pci vfio.gpu}</source>
           ${lib.optionalString (vfio.gpuRom or null != null) ''<rom bar="on" file="${vfio.gpuRom}"/>''}
+          <address type="pci" domain="0x0000" bus="0x10" slot="0x00" function="0x0" multifunction="on"/>
+        </hostdev>
+        <hostdev mode="subsystem" type="pci" managed="no">
+          <source>${pci vfio.gpuAudio}</source>
+          <address type="pci" domain="0x0000" bus="0x10" slot="0x00" function="0x1"/>
         </hostdev>'';
       usbdev = d: ''
         <hostdev mode="subsystem" type="usb" managed="yes">
@@ -177,7 +185,6 @@ in
             ${commonDevices}
             ${disk}
             ${gpuHostdev}
-            ${hostdev vfio.gpuAudio}
             <controller type="usb" model="qemu-xhci" ports="15"/>
             <channel type="unix"><target type="virtio" name="org.qemu.guest_agent.0"/></channel>
             ${lib.concatMapStrings usbdev (vfio.usb or [ ])}
