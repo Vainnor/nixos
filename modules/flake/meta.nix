@@ -29,7 +29,7 @@
     #              "dots" (flat dot grid), or a path like ../../assets/some.png
     #   theme:     "match" = the wallpaper's own palette; or "vainnor-slate" /
     #              "caelus" (assets/themes); or any base16 name
-    wallpaper = "dome";
+    wallpaper = "sentinel";
     theme = "match";
 
     # PipeWire name of your real output (BEACN Studio headphones or the HyperX
