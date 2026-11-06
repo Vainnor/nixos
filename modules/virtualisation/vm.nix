@@ -179,6 +179,7 @@ in
             ${gpuHostdev}
             ${hostdev vfio.gpuAudio}
             <controller type="usb" model="qemu-xhci" ports="15"/>
+            <channel type="unix"><target type="virtio" name="org.qemu.guest_agent.0"/></channel>
             ${lib.concatMapStrings usbdev (vfio.usb or [ ])}
             ${
               if vfio.installDisplay or false then
