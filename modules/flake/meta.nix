@@ -24,17 +24,20 @@
     # Where the repo is cloned on the PC (nh uses this).
     flakePath = "/home/vainnor/nixos";
 
-    # One-line theme switch: any name from `ls $(nix build nixpkgs#base16-schemes --print-out-paths)/share/themes`
-    theme = "catppuccin-mocha";
+    # One-line theme switch: "vainnor-slate" (the homelab/LibreWolf palette),
+    # "caelus" (dacctal's warm palette), both in assets/themes, or any base16 name
+    # from `ls $(nix build nixpkgs#base16-schemes --print-out-paths)/share/themes`.
+    theme = "vainnor-slate";
 
     # PipeWire name of your real output (BEACN Studio headphones or the HyperX
     # dongle), e.g. "alsa_output.usb-....analog-stereo". Run `just audio-devices`
     # on the PC to list them. null = virtual channels exist but System isn't default.
     audioOutput = null;
 
-    # Wallpaper: a nixos-artwork name (e.g. "catppuccin-mocha", "nineish-dark-gray")
-    # or a path like ../../assets/wallpaper.png. Colours still come from `theme`.
-    wallpaper = "catppuccin-mocha";
+    # Wallpaper: "dots" (flat theme background with a faint dot grid, own themes
+    # only), a nixos-artwork name (e.g. "nineish-dark-gray"), or a path like
+    # ../../assets/wallpaper.png. Colours still come from `theme`.
+    wallpaper = "dots";
 
     # sops-nix secrets (secrets/secrets.yaml). Flip to true once the PC's host
     # key is a recipient in .sops.yaml and the file was re-encrypted
@@ -63,6 +66,9 @@
     # The Mac's hostname (`scutil --get LocalHostName`); darwin-rebuild picks
     # darwinConfigurations.<this> automatically.
     macHost = "Vainnors-MacBook-Pro";
+    # The Mac's LibreWolf profile folder (about:support > Profile Folder); it gets
+    # the same userChrome/userContent as the PC.
+    macLibrewolfProfile = "t3syv4fs.default-release";
 
     # Night light (wlsunset) follows sunset here. Chicago.
     location = {

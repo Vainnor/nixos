@@ -33,7 +33,7 @@
         settings = {
           # Look
           border_px = 2;
-          border_radius = 8;
+          border_radius = 0; # square, like the rest of the desktop
           gap_inner_horizontal = 6;
           gap_inner_vertical = 6;
           gap_outer_horizontal = 10;

@@ -1,4 +1,5 @@
 # Waybar on both monitors, started by systemd with the Mango session.
+# Plain lowercase text labels instead of icons; the look is in desktop/square.nix.
 {
   flake.modules.homeManager.desktop = {
     programs.waybar = {
@@ -8,7 +9,7 @@
         layer = "top";
         position = "top";
         height = 28;
-        spacing = 8;
+        spacing = 0;
         modules-left = [ "ext/workspaces" ];
         modules-center = [ "clock" ];
         modules-right = [
@@ -21,7 +22,7 @@
           "custom/power"
         ];
         "custom/power" = {
-          format = "⏻";
+          format = "[ off ]";
           tooltip = false;
           on-click = "power-menu";
         };
@@ -31,27 +32,22 @@
           sort-by-id = true;
         };
         clock = {
-          format = "{:%a %b %d  %H:%M}";
+          format = "{:%Y-%m-%d  %H:%M}";
           tooltip-format = "<tt>{calendar}</tt>";
         };
         pulseaudio = {
-          format = "{icon} {volume}%";
-          format-muted = "󰝟 muted";
-          format-icons.default = [
-            "󰕿"
-            "󰖀"
-            "󰕾"
-          ];
+          format = "vol {volume}%";
+          format-muted = "vol muted";
           on-click = "pwvucontrol";
         };
         network = {
-          format-wifi = "󰖩 {essid}";
-          format-ethernet = "󰈀 wired";
-          format-disconnected = "󰖪 offline";
+          format-wifi = "net {essid}";
+          format-ethernet = "net wired";
+          format-disconnected = "net offline";
           tooltip-format = "{ifname} {ipaddr}";
         };
-        cpu.format = "󰍛 {usage}%";
-        memory.format = "󰘚 {percentage}%";
+        cpu.format = "cpu {usage}%";
+        memory.format = "mem {percentage}%";
         tray.spacing = 8;
       };
     };

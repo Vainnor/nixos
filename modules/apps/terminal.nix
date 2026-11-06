@@ -5,7 +5,7 @@
       enable = true;
       enableFishIntegration = true;
       settings = {
-        window-padding-x = 10;
+        window-padding-x = 8;
         window-padding-y = 8;
         window-decoration = false;
         confirm-close-surface = false;

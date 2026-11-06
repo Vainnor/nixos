@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/Vainnor/nixos/actions/workflows/secrets.yml"><img alt="secrets" src="https://github.com/Vainnor/nixos/actions/workflows/secrets.yml/badge.svg?branch=main"></a>
-  <img alt="NixOS: 26.11" src="https://img.shields.io/badge/NixOS-26.11-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> <img alt="nix-darwin: Mac" src="https://img.shields.io/badge/nix--darwin-Mac-B5A8F5?style=flat-square&labelColor=1D232E&logo=apple&logoColor=F5F7FB"> <img alt="theme: catppuccin mocha" src="https://img.shields.io/badge/theme-catppuccin%20mocha-243142?style=flat-square&labelColor=1D232E">
+  <img alt="NixOS: 26.11" src="https://img.shields.io/badge/NixOS-26.11-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> <img alt="nix-darwin: Mac" src="https://img.shields.io/badge/nix--darwin-Mac-B5A8F5?style=flat-square&labelColor=1D232E&logo=apple&logoColor=F5F7FB"> <img alt="theme: vainnor slate" src="https://img.shields.io/badge/theme-vainnor%20slate-243142?style=flat-square&labelColor=1D232E">
 </p>
 <p align="center">
   <img alt="aspects: 7" src="https://img.shields.io/badge/aspects-7-B5A8F5?style=flat-square&labelColor=1D232E"> <img alt="modules: 60" src="https://img.shields.io/badge/modules-60-B5A8F5?style=flat-square&labelColor=1D232E"> <a href="TODO.md"><img alt="read: the todo list" src="https://img.shields.io/badge/read-the%20todo%20list-243142?style=flat-square&labelColor=1D232E"></a>
@@ -33,9 +33,13 @@ is just the list of aspects it picks.
 | `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, kubectl, k9s, OpenTofu, Ansible, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
 | `vm` | libvirt: `win11` with the 7900 XTX passed through, `win11-lite` in a window, WinApps |
 | `privacy` | i2pd, and a LibreWolf profile that only talks through it |
+| `browser` | LibreWolf with Sidebery (vertical tabs), Stylus and 1Password, the tab strip hidden, square corners, about: pages in the system palette (on the Mac too) |
 
 Shared values (user, theme, wallpaper, monitors, audio output, VFIO addresses) live in
-`modules/flake/meta.nix`. **Change `theme` there and everything re-themes.**
+`modules/flake/meta.nix`. **Change `theme` there and everything re-themes.** The look is flat
+and square everywhere (no rounded corners, shadows or blur, lowercase text labels). The palette is
+`vainnor-slate`, the same one as the homelab and LibreWolf; `caelus` is a warm alternative, and any
+base16 name works too. Palettes live in `assets/themes/`.
 
 ## Built with
 
@@ -54,7 +58,7 @@ Versions are the ones pinned in `flake.lock` today; `just update` moves them.
 |  | <img alt="LibreWolf: 159.0" src="https://img.shields.io/badge/LibreWolf-159.0-B5A8F5?style=flat-square&labelColor=1D232E&logo=librewolf&logoColor=F5F7FB"> | `159.0` |
 |  | <img alt="fuzzel: 1.15.0" src="https://img.shields.io/badge/fuzzel-1.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.15.0` |
 |  | <img alt="Waybar: 0.15.0" src="https://img.shields.io/badge/Waybar-0.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.15.0` |
-|  | <img alt="Stylix: catppuccin mocha" src="https://img.shields.io/badge/Stylix-catppuccin%20mocha-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="Stylix: vainnor slate" src="https://img.shields.io/badge/Stylix-vainnor%20slate-243142?style=flat-square&labelColor=1D232E"> |  |
 | **Graphics** | <img alt="Mesa RADV: 26.2.6" src="https://img.shields.io/badge/Mesa%20RADV-26.2.6-B5A8F5?style=flat-square&labelColor=1D232E&logo=amd&logoColor=F5F7FB"> | `26.2.6` |
 |  | <img alt="PipeWire: 1.6.9" src="https://img.shields.io/badge/PipeWire-1.6.9-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.6.9` |
 | **Gaming** | <img alt="Steam: Proton GE 11-11" src="https://img.shields.io/badge/Steam-Proton%20GE%2011--11-B5A8F5?style=flat-square&labelColor=1D232E&logo=steam&logoColor=F5F7FB"> | `Proton GE 11-11` |
@@ -157,6 +161,20 @@ Sign in once, then in *Settings > Developer* turn on **Use the SSH agent** and *
 
 - **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `just snapshots` lists them; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
 - **restic to the homelab**: put the repository URL, a password and (for S3/MinIO) keys in `restic/*` with `just secrets-edit`, then set `meta.resticReady = true` and deploy. It runs nightly at 03:30 (or at the next boot if the PC was off). `just backup` runs it now, `just restore <path>` gets files back.
+
+</details>
+
+<details>
+<summary><b>LibreWolf (Sidebery and Stylus)</b></summary>
+
+The extensions, the sidebar layout and both stylesheets are in the config. What each extension
+keeps inside itself is not: export it once on the Mac and import it on the PC.
+
+- **Sidebery**: *Settings > Help > Export addon data*, then *Import addon data* on the PC.
+- **Stylus**: *Manage > Backup > Export*, then *Import* on the PC.
+
+Keep the two exports somewhere safe (1Password works). The stylesheets are in `assets/librewolf/`;
+`userContent.css.in` takes its colours from the theme, so edit the rules there, not the colours.
 
 </details>
 
@@ -298,7 +316,7 @@ outside a project, `uv run --python 3.12 script.py` works anywhere.
 
 ## The Mac
 
-nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with signing, direnv, vis and the Stylix theme. It leaves apps, Homebrew, Zed's settings, `~/.ssh/config` and your `starship.toml` alone. Files it takes over (like `~/.config/fish/config.fish`) are kept next to it as `*.hm-backup`.
+nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with signing, direnv, vis and the Stylix theme. It leaves apps, Homebrew, Zed's settings, `~/.ssh/config` and your `starship.toml` alone. In LibreWolf it only writes the two stylesheets into your profile (`meta.macLibrewolfProfile`), never `profiles.ini`. Files it takes over (like `~/.config/fish/config.fish`) are kept next to it as `*.hm-backup`.
 
 First time:
 1. `sudo mv /etc/nix/nix.conf /etc/nix/nix.conf.before-nix-darwin` (nix-darwin manages it from now on). If it also complains about `/etc/bashrc` or `/etc/zshrc`, move those the same way.

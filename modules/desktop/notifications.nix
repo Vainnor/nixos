@@ -1,5 +1,5 @@
 # SwayNotificationCenter: pop-ups plus a panel with history, Do Not Disturb
-# and media controls. Super+Shift+N opens the panel; the bell in the bar
+# and media controls. Super+Shift+N opens the panel; the [ ] in the bar
 # shows unread count (click: panel, right-click: Do Not Disturb).
 {
   flake.modules.homeManager.desktop = {
@@ -33,10 +33,10 @@
         return-type = "json";
         format = "{icon}";
         format-icons = {
-          none = "󰂚";
-          notification = "󱅫";
-          dnd-none = "󰂛";
-          dnd-notification = "󰂛";
+          none = "[ ]";
+          notification = "[ * ]";
+          dnd-none = "[ dnd ]";
+          dnd-notification = "[ dnd* ]";
         };
         tooltip = false;
         on-click = "swaync-client -t -sw";

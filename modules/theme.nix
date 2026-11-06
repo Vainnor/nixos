@@ -2,20 +2,40 @@
 # and every themed app follows: GTK/Qt, Ghostty, fuzzel, waybar, swaync,
 # swaylock, the boot splash, LibreWolf, Vesktop, Zed, btop, bat, fish, ... plus Mango and vis,
 # which read the palette below by hand because Stylix has no target for them.
-{ inputs, config, ... }:
+#
+# Themes: our own in assets/themes (vainnor-slate, caelus), or any base16 name.
+# The style is flat and square everywhere: no rounded corners, shadows or blur.
+{
+  inputs,
+  config,
+
+  ...
+}:
 let
   inherit (config) meta;
 
+  palette = import ../assets/themes meta.theme;
+
+  # A flat background in the theme's colours, with a faint dot grid.
+  dots =
+    pkgs:
+    let
+      c = palette.scheme;
+    in
+    pkgs.runCommand "wallpaper.png" { nativeBuildInputs = [ pkgs.imagemagick ]; } ''
+      magick -size 24x24 xc:'#${c.base00}' -fill '#${c.base02}' -draw 'circle 3,3 4.2,3' tile.png
+      magick -size 3440x1440 tile:tile.png "$out"
+    '';
+
   stylixFor = pkgs: {
     enable = true;
-    image =
-      if builtins.isPath meta.wallpaper then
-        meta.wallpaper
+    # Local themes are plain Nix; base16 names come straight from the source
+    # download, so evaluating the Mac's config on Linux (or the reverse) needs no build.
+    base16Scheme =
+      if palette.scheme != null then
+        palette.scheme
       else
-        pkgs.nixos-artwork.wallpapers.${meta.wallpaper}.gnomeFilePath;
-    # Straight from the source download (same file on every system), so
-    # evaluating the Mac's config on Linux, or the PC's on the Mac, needs no build.
-    base16Scheme = "${pkgs.base16-schemes.src}/base16/${meta.theme}.yaml";
+        "${pkgs.base16-schemes.src}/base16/${meta.theme}.yaml";
     polarity = "dark";
 
     fonts = {
@@ -50,6 +70,13 @@ in
     {
       imports = [ inputs.stylix.nixosModules.stylix ];
       stylix = stylixFor pkgs // {
+        image =
+          if builtins.isPath meta.wallpaper then
+            meta.wallpaper
+          else if meta.wallpaper == "dots" && palette.scheme != null then
+            dots pkgs
+          else
+            pkgs.nixos-artwork.wallpapers.${meta.wallpaper}.gnomeFilePath;
         cursor = {
           package = pkgs.bibata-cursors;
           name = "Bibata-Modern-Classic";
@@ -84,9 +111,11 @@ in
     let
       c = config.lib.stylix.colors;
       argb = hex: "0x${hex}ff";
+      border = if palette.extra.border != null then palette.extra.border else c.base02;
     in
     {
       stylix.targets.rofi.enable = false; # not used; silences an upstream warning
+      stylix.targets.gtk.extraCss = "* { border-radius: 0; box-shadow: none; }";
       stylix.targets.librewolf.profileNames = [
         "default"
         "i2p"
@@ -94,7 +123,7 @@ in
 
       wayland.windowManager.mango.settings = {
         root_color = argb c.base00;
-        border_color = argb c.base02;
+        border_color = argb border;
         focus_color = argb c.base0D;
         urgent_color = argb c.base08;
         maximized_screen_color = argb c.base0B;

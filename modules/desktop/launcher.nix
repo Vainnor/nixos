@@ -53,6 +53,10 @@
           lines = 12;
           prompt = "'❯ '";
         };
+        settings.border = {
+          radius = 0;
+          width = 2;
+        };
       };
 
       home.packages = [

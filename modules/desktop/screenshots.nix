@@ -41,6 +41,7 @@
           actions-on-enter = [ "save-to-clipboard" ];
           actions-on-escape = [ "exit" ];
           save-after-copy = true;
+          corner-roundness = 0;
         };
       };
 
