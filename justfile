@@ -337,6 +337,27 @@ fans-save:
     git add assets/coolercontrol/config.toml
     echo "Saved. Commit it with: just commit \"chore(fans): save fan curves\""
 
+# ── Temporary sudo ─────────────────────────────────────────────────────
+
+# sudo without a password for a while (default 60 min), e.g. so Claude can work over SSH. A reboot also ends it.
+sudo-unlock minutes="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=/run/sudoers.d/unlock
+    echo "$USER ALL=(ALL:ALL) NOPASSWD: ALL" | sudo tee "$f.new" >/dev/null
+    sudo chmod 0440 "$f.new"
+    sudo visudo -cqf "$f.new"
+    sudo mv "$f.new" "$f"
+    sudo systemctl stop sudo-relock.timer 2>/dev/null || true
+    sudo systemd-run --quiet --unit=sudo-relock --on-active={{ minutes }}m rm -f "$f"
+    echo "Passwordless sudo until $(date -d '+{{ minutes }} min' +%H:%M). End it now with: just sudo-lock"
+
+# End `just sudo-unlock` now
+sudo-lock:
+    sudo rm -f /run/sudoers.d/unlock
+    sudo systemctl stop sudo-relock.timer 2>/dev/null || true
+    @echo "sudo asks for a password again."
+
 # ── Secure Boot + TPM ──────────────────────────────────────────────────
 
 # Show Secure Boot state and whether this boot was signed
