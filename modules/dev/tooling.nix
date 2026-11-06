@@ -33,7 +33,6 @@ in
 
       home.packages = with pkgs; [
         rustup # quick experiments; real projects use the flake template
-        just
         hyperfine
         tokei
       ];

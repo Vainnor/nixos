@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Gameplay (ultrawide, letterboxed, no webcam)</title>
+<link rel="stylesheet" href="css/base.css">
+<style>
+  /* Letterbox bars: a 3440x1440 game fitted into 1920x1080 leaves 138 px above and below. */
+  .lb { position: absolute; left: 0; width: 1920px; height: 138px; overflow: hidden; background: var(--ink); }
+  .lb.top { top: 0; }
+  .lb.bottom { top: 942px; }
+  .lb .bars { opacity: 0.1; }
+  .lb.top::after, .lb.bottom::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--seam); }
+  .lb.top::after { bottom: 0; }
+  .lb.bottom::after { top: 0; }
+  .lb .scan { position: absolute; inset: 0; }
+  .plate.small { top: 43px; }
+  .feed { top: 981px; }
+  .bug.up { bottom: 46px; }
+  .crawl { height: 58px; }
+</style>
+</head>
+<body>
+<!-- Transparent in the middle. Game capture goes BELOW this source, set to Fit to screen so OBS letterboxes it.
+     Webcam goes inside the bezel: 480 x 270 at x 64, y 622. No chat on this scene by design. -->
+<div class="stage clear" id="stage">
+  <div class="lb top"><div class="bars"></div><div class="grain"></div><div class="scan"></div></div>
+  <div class="lb bottom"><div class="bars"></div><div class="grain"></div><div class="scan"></div></div>
+
+  <div class="plate small live" id="plate">
+    <div class="lamp"></div>
+    <div class="state">On air</div>
+    <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="uptime" id="uptime">00:00:00</div>
+  </div>
+
+  <div class="camgroup" id="camgroup">
+    <div class="camglass" style="left:64px;top:622px;width:480px;height:270px"><div class="roll"></div></div>
+    <div class="bezel" style="left:40px;top:598px;width:528px;height:318px"></div>
+    <div class="feed" style="left:40px;top:956px"><span class="lamp"></span>Live feed</div>
+  </div>
+
+  <div class="bug up"><b></b>Vainnor</div>
+  <div class="crawl hidden" id="crawl"></div>
+</div>
+<script src="../../js/config.js"></script>
+<script>window.VAINNOR_PAGE = { camera: false, cameraSource: "" };</script>
+<script src="../../js/core.js"></script>
+<script>
+  var meter = Signal.meter(document.getElementById("meter"));
+  var up = Signal.uptime(document.getElementById("uptime"));
+  Signal.events();
+  Signal.bus.on("alert", function () { meter.dip(1400); });
+  if (Signal.cfg.gameplayCrawl) { var cr = document.getElementById("crawl"); cr.classList.remove("hidden"); Signal.crawl(cr); }
+
+  var group = document.getElementById("camgroup"), shown = null;
+  var cam = Signal.camera(function (on) {
+    if (on === shown) return;
+    var first = shown === null; shown = on;
+    if (on) { group.style.display = "block"; group.classList.remove("cam-out"); if (!first) group.classList.add("cam-in"); }
+    else { group.classList.remove("cam-in"); if (first) { group.style.display = "none"; return; } group.classList.add("cam-out"); setTimeout(function () { if (!shown) { group.style.display = "none"; } }, 420); }
+  });
+  Signal.debug([{ label: "Toggle cam", fn: function () { cam.toggle(); } }, { label: "Reset clock", fn: function () { up.reset(); } }]);
+</script>
+</body>
+</html>

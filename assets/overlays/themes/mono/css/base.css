@@ -1,0 +1,270 @@
+/* Vainnor broadcast: mono theme. Generated: theme values on top, shared layout below. */
+@font-face { font-family: "Archivo"; src: url("../fonts/archivo-wdth-wght.woff2") format("woff2-variations"); font-weight: 100 900; font-stretch: 62% 125%; font-display: block; }
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("../fonts/atkinson-400.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("../fonts/atkinson-700.woff2") format("woff2"); font-weight: 700; font-display: block; }
+
+:root {
+  --ink: #000;
+  --paper: #f4f4f4;
+  --dim: #9a9a9a;
+  --accent: #f4f4f4;
+  --kind: #bdbdbd;
+  --display: "Archivo", sans-serif;
+  --body: "Atkinson Hyperlegible", sans-serif;
+  --stretch: 125%;
+  --dw: 900;
+  --tt: uppercase;
+  --tr: -0.01em;
+  --ts: 1;
+  --bm: 400;
+  --bs: 1;
+  --bars: linear-gradient(90deg, #fff 0 14.28%, #d2d2d2 0 28.56%, #aaa 0 42.84%, #7c7c7c 0 57.12%, #545454 0 71.4%, #2c2c2c 0 85.68%, #000 0 100%);
+  --seam: rgba(255,255,255,0.35);
+  --bezel-edge: rgba(255,255,255,0.38);
+}
+.themeart { position: absolute; inset: 0; pointer-events: none; display: none; }
+
+/* Vainnor broadcast, shared base. Black, white and greys only. */
+
+html, body { margin: 0; background: transparent; }
+
+.stage {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--body);
+}
+.stage.opaque { background: var(--ink); }
+
+/* ---------- screen textures (graphics only, never over game/cam/chat) ---------- */
+
+/* Test bars: the station is idle. Seven greys, hard edges. */
+.bars {
+  position: absolute; inset: 0;
+  opacity: 0.24;
+  transition: opacity 2s ease-out;
+  background: var(--bars);
+}
+
+/* Once on air, the idle bars fade almost out. */
+.stage.onair .bars { opacity: 0.04; }
+
+/* Grain: tape and broadcast noise. One oversized layer stepped by transform. */
+.grain {
+  position: absolute; left: -256px; top: -256px;
+  width: calc(1920px + 512px); height: calc(1080px + 512px);
+  background: url("../img/grain.png") repeat;
+  opacity: 0.55;
+  pointer-events: none;
+  animation: grain-step 0.9s steps(1) infinite;
+}
+.stage.weak .grain { opacity: 0.9; }
+@keyframes grain-step {
+  0%   { transform: translate(0, 0); }
+  12%  { transform: translate(-71px, 38px); }
+  25%  { transform: translate(43px, -112px); }
+  37%  { transform: translate(-129px, -57px); }
+  50%  { transform: translate(86px, 94px); }
+  62%  { transform: translate(-34px, 141px); }
+  75%  { transform: translate(112px, -23px); }
+  87%  { transform: translate(-97px, -139px); }
+}
+
+/* Scanlines: CRT screen. Static, so it costs nothing at runtime. */
+.scan {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(180deg,
+    rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,0.28) 3px, rgba(0,0,0,0) 4px);
+}
+
+/* Rolling bar: interference. Slow when idle, faster on events. */
+.roll {
+  position: absolute; left: 0; top: 0; width: 1920px; height: 260px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.075) 50%, rgba(255,255,255,0) 100%);
+  animation: roll 9s linear infinite;
+}
+.stage.weak .roll { animation-duration: 5s; }
+@keyframes roll {
+  from { transform: translateY(-300px); }
+  to   { transform: translateY(1120px); }
+}
+
+/* Glass: rounded CRT edge and dark corners. */
+.glass {
+  position: absolute; inset: 0;
+  border-radius: 64px;
+  pointer-events: none;
+  box-shadow: inset 0 0 150px 40px rgba(0,0,0,0.75), 0 0 0 120px var(--ink);
+}
+
+/* Power-on: a white line opens into the picture. */
+.poweron { position: absolute; inset: 0; animation: poweron 1.7s cubic-bezier(.2,.7,.2,1) 1 both; transform-origin: 50% 50%; }
+@keyframes poweron {
+  0%   { transform: scale(0, 0.004); filter: brightness(6); opacity: 1; }
+  18%  { transform: scale(1, 0.004); filter: brightness(6); }
+  55%  { transform: scale(1, 1.03);  filter: brightness(2.2); }
+  100% { transform: scale(1, 1);     filter: brightness(1); }
+}
+
+/* ---------- status plate: state of the signal ---------- */
+.plate {
+  position: absolute; left: 120px; top: 96px;
+  display: flex; align-items: center; gap: 28px;
+  padding: 16px 26px 16px 22px;
+  border: 3px solid var(--paper);
+  background: var(--ink);
+}
+.lamp {
+  width: 26px; height: 26px; background: var(--accent);
+  animation: lamp 1.1s steps(1) infinite;
+}
+.live .lamp { animation: none; }
+@keyframes lamp { 50% { opacity: 0.12; } }
+.state {
+  font-family: var(--body); font-weight: 700; font-size: calc(34px * var(--bs));
+  letter-spacing: 0.2em; text-transform: uppercase;
+}
+
+/* Signal meter: five bars, lit by progress. */
+.meter { display: flex; align-items: flex-end; gap: 6px; height: 46px; }
+.meter i { display: block; width: 11px; background: var(--accent); opacity: 0.18; transition: opacity 0.2s steps(2); }
+.meter i:nth-child(1) { height: 12px; }
+.meter i:nth-child(2) { height: 21px; }
+.meter i:nth-child(3) { height: 30px; }
+.meter i:nth-child(4) { height: 38px; }
+.meter i:nth-child(5) { height: 46px; }
+.meter i.on { opacity: 1; }
+.meter i.seek { animation: seek 0.7s steps(1) infinite; }
+@keyframes seek { 50% { opacity: 0.8; } }
+
+/* Ghosting: the signal arriving twice. */
+.ghosted { position: relative; }
+.ghosted .g1, .ghosted .g2 {
+  position: absolute; left: 0; top: 0; pointer-events: none;
+  white-space: nowrap;
+}
+.ghosted .g1 { opacity: 0.28; animation: ghost-a 7s ease-in-out infinite alternate; }
+.ghosted .g2 { opacity: 0.16; animation: ghost-b 11s ease-in-out infinite alternate; }
+@keyframes ghost-a { from { transform: translate(-18px, 0); } to { transform: translate(-6px, 3px); } }
+@keyframes ghost-b { from { transform: translate(22px, 2px); } to { transform: translate(10px, -3px); } }
+
+/* Station bug: the only corner mark in the set. */
+.bug {
+  position: absolute; right: 110px; bottom: 86px;
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--display); font-weight: var(--dw); font-stretch: var(--stretch);
+  font-size: 30px; letter-spacing: 0.06em;
+}
+.bug b { display: block; width: 22px; height: 22px; background: var(--accent); }
+
+.hidden { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .grain, .roll, .lamp, .meter i.seek, .ghosted .g1, .ghosted .g2, .poweron { position: absolute; inset: 0; animation: none; }
+}
+
+/* ======================================================================
+   Live-scene parts
+   ====================================================================== */
+
+.stage.clear { background: transparent; }
+.art { position: absolute; inset: 0; background: var(--ink); }
+
+/* Small status plate for live scenes (top-left) */
+.plate.small { left: 40px; top: 34px; gap: 18px; padding: 9px 16px 9px 14px; border-width: 2px; }
+.plate.small .lamp { width: 18px; height: 18px; }
+.plate.small .state { font-size: calc(22px * var(--bs)); }
+.plate.small .meter { height: 30px; gap: 4px; }
+.plate.small .meter i { width: 8px; }
+.plate.small .meter i:nth-child(1) { height: 8px; }
+.plate.small .meter i:nth-child(2) { height: 14px; }
+.plate.small .meter i:nth-child(3) { height: 20px; }
+.plate.small .meter i:nth-child(4) { height: 25px; }
+.plate.small .meter i:nth-child(5) { height: 30px; }
+.uptime {
+  font-family: var(--display); font-weight: var(--dw); font-stretch: var(--stretch);
+  font-size: 22px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums;
+  padding-left: 18px; border-left: 2px solid var(--paper);
+}
+
+/* CRT bezel: the cam is the live feed. Interior is transparent. */
+.bezel {
+  position: absolute; box-sizing: border-box;
+  border: 24px solid #0b0b0b; border-radius: 34px;
+  box-shadow: inset 0 0 0 2px var(--bezel-edge), 0 0 0 2px rgba(255,255,255,0.16);
+  pointer-events: none;
+}
+.camglass { position: absolute; overflow: hidden; border-radius: 10px; pointer-events: none;
+  box-shadow: inset 0 0 70px rgba(0,0,0,0.55);
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,0.16) 3px, rgba(0,0,0,0) 4px); }
+.camglass .roll { height: 130px; width: 100%; animation-duration: 11s; }
+.camglass .roll.big { height: 220px; }
+.feed {
+  position: absolute; display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; background: var(--ink); border: 2px solid var(--paper);
+  font-weight: 700; font-size: calc(20px * var(--bs)); letter-spacing: 0.2em; text-transform: uppercase;
+}
+.feed .lamp { width: 14px; height: 14px; animation: none; }
+
+/* Captions: chat as closed captions. Empty space stays transparent. */
+.caps {
+  position: absolute; display: flex; flex-direction: column; justify-content: flex-end;
+  align-items: flex-start; gap: 8px; overflow: hidden; pointer-events: none;
+}
+.cap {
+  max-width: 100%; box-sizing: border-box; padding: 9px 16px 11px;
+  background: var(--ink); color: var(--paper); font-size: calc(30px * var(--bs)); line-height: 1.2; font-weight: var(--bm);
+  word-wrap: break-word; overflow-wrap: anywhere;
+  transition: opacity 0.7s ease-out;
+}
+.cap b { display: block; font-size: calc(19px * var(--bs)); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 2px; }
+.cap.out { opacity: 0; }
+.cap.flick { animation: cap-flick 0.32s steps(1) 1; }
+@keyframes cap-flick { 0% { opacity: 0; } 14% { opacity: 1; transform: translateX(-10px); } 28% { opacity: 0.2; transform: translateX(6px); } 42% { opacity: 1; transform: none; } 100% { opacity: 1; } }
+
+/* Station crawl: bottom strip, real content only */
+.crawl {
+  position: absolute; left: 0; bottom: 0; width: 1920px; height: 58px; overflow: hidden;
+  background: var(--ink); border-top: 3px solid var(--paper);
+}
+.crawl-track {
+  display: flex; white-space: nowrap; height: 100%; align-items: center; width: max-content;
+  font-weight: 700; font-size: calc(26px * var(--bs)); letter-spacing: 0.14em; text-transform: uppercase;
+  animation: crawl 60s linear infinite; white-space: pre;
+}
+.crawl-track span { padding-right: 0; }
+@keyframes crawl { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+.bug.up { bottom: 82px; right: 40px; }
+
+/* Hold: the picture slips now and then. */
+.hold { animation: hold 9s steps(1) infinite; }
+@keyframes hold { 0%, 93%, 100% { transform: none; } 94% { transform: translateY(9px); } 96% { transform: translateY(-5px); } 98% { transform: translateY(2px); } }
+
+/* Dropout: signal loss on load */
+.dropout { animation: dropout 0.9s steps(1) 1 both; }
+@keyframes dropout { 0% { opacity: 0; } 10% { opacity: 1; transform: translateY(40px); } 20% { opacity: 0.3; } 35% { opacity: 1; transform: translateY(-14px); } 55% { opacity: 0.6; transform: none; } 70%, 100% { opacity: 1; transform: none; } }
+
+.debug { position: fixed; right: 12px; top: 12px; z-index: 99; display: flex; gap: 6px; background: #222; padding: 6px; border: 1px solid #888; }
+.debug button { font: 700 14px var(--body); padding: 6px 10px; cursor: pointer; }
+
+.centerdot { position: absolute; left: 950px; top: 530px; width: 20px; height: 20px; border-radius: 50%; background: var(--paper); opacity: 0;
+  box-shadow: 0 0 30px 12px rgba(255,255,255,0.7); }
+
+@media (prefers-reduced-motion: reduce) {
+  .crawl-track, .hold, .dropout, .cap.flick { animation: none; }
+}
+
+.ghosted { word-spacing: 0.14em; }
+
+/* Webcam group: shows and hides with the OBS webcam source */
+.camgroup { position: absolute; inset: 0; display: none; }
+.cam-in  { animation: dropout 0.9s steps(1) 1 both; }
+.cam-out { animation: camout 0.4s steps(1) 1 both; }
+@keyframes camout { 0% { opacity: 1; } 20% { opacity: 0.25; } 40% { opacity: 1; transform: translateY(8px); } 70% { opacity: 0.2; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cam-in, .cam-out { animation: none; } }

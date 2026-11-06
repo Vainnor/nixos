@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Alerts</title>
+<link rel="stylesheet" href="css/base.css">
+<style>
+  /* Full-frame transparent layer. Add it on top of any scene. Idle = nothing visible. */
+  #fx { position: absolute; inset: 0; pointer-events: none; }
+  #fx > * { position: absolute; opacity: 0; }
+
+  .f-flash  { inset: 0; background: var(--paper); }
+  .f-grain  { left: -256px; top: -256px; width: 2432px; height: 1592px; background: url("img/grain.png") repeat; }
+  .f-bars   { inset: 0; background: var(--bars); }
+  .f-roll   { left: 0; top: 0; width: 1920px; height: 340px; background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.3) 50%, rgba(255,255,255,0)); }
+  .f-tear   { left: 0; width: 1920px; height: 5px; background: var(--paper); }
+
+  /* Caption card (lower third) */
+  .cardx { left: 120px; bottom: 150px; display: block; box-sizing: border-box; max-width: 1400px; padding: 22px 34px 26px;
+    background: var(--ink); border: 3px solid var(--paper); color: var(--paper); }
+  .cardx .kind { font-weight: 700; font-size: calc(24px * var(--bs)); letter-spacing: 0.24em; text-transform: uppercase; color: var(--kind); }
+  .cardx .who { position: relative; font-family: var(--display); font-weight: var(--dw); font-stretch: var(--stretch); font-size: calc(68px * var(--ts)); line-height: 1.05; text-transform: var(--tt); letter-spacing: var(--tr); }
+  .cardx .who .g1, .cardx .who .g2 { position: absolute; left: 0; top: 0; opacity: 0; white-space: nowrap; }
+  .cardx .what { font-weight: 700; font-size: calc(36px * var(--bs)); letter-spacing: 0.06em; margin-top: 6px; }
+
+  /* FOLLOW: ghost double-image, two tears, short grain */
+  #fx.follow .cardx   { animation: show 3.2s steps(1) 1 both; }
+  #fx.follow .g1      { animation: gh1 3.2s ease-out 1 both; }
+  #fx.follow .g2      { animation: gh2 3.2s ease-out 1 both; }
+  #fx.follow .f-grain { animation: pulse 0.6s steps(2) 1 both; }
+  #fx.follow .t1      { top: 380px; animation: tear 0.7s steps(1) 1 both; }
+  #fx.follow .t2      { top: 690px; animation: tear 0.7s steps(1) 1 0.15s both; }
+  /* SUB: slow heavy roll, grain, then caption */
+  #fx.sub .cardx      { animation: show 4.6s steps(1) 1 both; }
+  #fx.sub .f-roll     { animation: bigroll 2.6s linear 1 both; }
+  #fx.sub .f-grain    { animation: pulse 1.4s steps(4) 1 both; }
+  /* RAID: bars surge, fast roll, flicker */
+  #fx.raid .cardx     { animation: show 6s steps(1) 1 both; }
+  #fx.raid .f-bars    { animation: surge 1.4s steps(1) 1 both; }
+  #fx.raid .f-roll    { animation: bigroll 0.9s linear 2 both; }
+  #fx.raid .f-grain   { animation: pulse 2s steps(5) 1 both; }
+  #fx.raid .f-flash   { animation: flashy 0.5s steps(1) 1 both; }
+  /* CHEER: static burst and white flash */
+  #fx.cheer .cardx    { animation: show 3s steps(1) 1 both; }
+  #fx.cheer .f-grain  { animation: burst 0.9s steps(3) 1 both; }
+  #fx.cheer .f-flash  { animation: flashy 0.35s steps(1) 1 both; }
+
+  @keyframes show   { 0% { opacity: 0; transform: translateX(-14px); } 6% { opacity: 1; } 10% { opacity: 0.2; } 14%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @keyframes gh1    { 0% { opacity: 0.5; transform: translate(-24px, 0); } 60% { opacity: 0.3; transform: translate(-8px, 2px); } 100% { opacity: 0; transform: none; } }
+  @keyframes gh2    { 0% { opacity: 0.3; transform: translate(26px, 3px); } 60% { opacity: 0.2; transform: translate(10px, -2px); } 100% { opacity: 0; transform: none; } }
+  @keyframes pulse  { 0% { opacity: 0.8; transform: translate(0, 0); } 33% { opacity: 0.5; transform: translate(-130px, 60px); } 66% { opacity: 0.6; transform: translate(80px, -90px); } 100% { opacity: 0; transform: translate(0, 0); } }
+  @keyframes burst  { 0% { opacity: 1; transform: translate(0, 0); } 50% { opacity: 0.95; transform: translate(-90px, 70px); } 100% { opacity: 0; transform: translate(60px, -40px); } }
+  @keyframes tear   { 0% { opacity: 0.9; transform: translateX(-200px); } 40% { opacity: 0.5; transform: translateX(160px); } 80% { opacity: 0.8; transform: translateX(-60px); } 100% { opacity: 0; } }
+  @keyframes bigroll{ 0% { opacity: 1; transform: translateY(-360px); } 100% { opacity: 1; transform: translateY(1100px); } }
+  @keyframes surge  { 0% { opacity: 0.6; } 15% { opacity: 0; } 30% { opacity: 0.5; } 45% { opacity: 0; } 60% { opacity: 0.35; } 75%, 100% { opacity: 0; } }
+  @keyframes flashy { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #fx.follow .g1, #fx.follow .g2, #fx > .f-grain, #fx > .f-roll, #fx > .f-bars, #fx > .f-flash, #fx > .t1, #fx > .t2 { animation: none !important; opacity: 0 !important; } }
+</style>
+</head>
+<body>
+<div class="stage clear">
+  <div id="fx">
+    <div class="f-bars"></div>
+    <div class="f-roll"></div>
+    <div class="f-grain"></div>
+    <div class="f-tear t1"></div>
+    <div class="f-tear t2"></div>
+    <div class="f-flash"></div>
+    <div class="cardx" id="card">
+      <div class="kind" id="kind"></div>
+      <div class="who"><span class="g1" id="g1" aria-hidden="true"></span><span class="g2" id="g2" aria-hidden="true"></span><span id="who"></span></div>
+      <div class="what" id="what"></div>
+    </div>
+  </div>
+</div>
+<script src="../../js/config.js"></script>
+<script src="../../js/core.js"></script>
+<script>
+  var fx = document.getElementById("fx");
+  var length = { follow: 3200, sub: 4600, raid: 6000, cheer: 3000 };
+  var queue = [], busy = false;
+
+  function words(e) {
+    var n = e.amount, num = (n != null && isFinite(n)) ? Number(n) : null;
+    if (e.type === "follow") return ["New signal", "tuned in"];
+    if (e.type === "sub")    return ["Subscription", num && num > 1 ? "subscribed for " + num + " months" : "subscribed"];
+    if (e.type === "raid")   return ["Raid", num ? "arrives with " + num + " viewers" : "arrives"];
+    if (e.type === "cheer")  return ["Cheer", num ? "cheered " + num + " bits" : "cheered"];
+    return ["", ""];
+  }
+
+  function play(e) {
+    busy = true;
+    var w = words(e);
+    document.getElementById("kind").textContent = w[0];
+    document.getElementById("who").textContent = e.name;
+    document.getElementById("g1").textContent = e.name;
+    document.getElementById("g2").textContent = e.name;
+    document.getElementById("what").textContent = w[1];
+    fx.className = "";
+    void fx.offsetWidth;                // restart the animations
+    fx.className = e.type;
+    setTimeout(function () { fx.className = ""; busy = false; next(); }, (length[e.type] || 3000) + 300);
+  }
+  function next() { if (!busy && queue.length) play(queue.shift()); }
+
+  Signal.bus.on("alert", function (e) { queue.push(e); next(); });
+  Signal.events();
+  Signal.debug();
+</script>
+</body>
+</html>

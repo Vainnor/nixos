@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · OBS setup</title>
+<style>
+  body { font: 16px/1.5 system-ui, Segoe UI, sans-serif; background: #111; color: #eee; margin: 0; padding: 32px; }
+  main { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 28px 0 8px; }
+  p, li { color: #ccc; }
+  .box { background: #1b1b1b; border: 1px solid #3a3a3a; padding: 16px 18px; margin: 12px 0; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  input[type=text], input[type=password], select { width: 100%; box-sizing: border-box; padding: 9px 10px; font: inherit; background: #000; color: #fff; border: 1px solid #666; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .check { display: flex; gap: 10px; align-items: center; margin: 6px 0; font-weight: 400; }
+  button { font: 700 16px system-ui; padding: 10px 18px; margin: 12px 10px 0 0; background: #fff; color: #000; border: 0; cursor: pointer; }
+  button:disabled { background: #555; color: #999; cursor: default; }
+  #log { white-space: pre-wrap; font: 14px/1.45 ui-monospace, Consolas, monospace; background: #000; border: 1px solid #3a3a3a; padding: 14px; min-height: 120px; color: #ddd; }
+  .hint { font-size: 14px; color: #aaa; margin-top: 4px; }
+  .arow { display: grid; grid-template-columns: 24px 1.1fr 1.4fr 120px; gap: 10px; align-items: center; margin: 8px 0; }
+  .arow .lbl { font-weight: 600; }
+  .arow .why { grid-column: 2 / 5; font-size: 14px; color: #aaa; margin-top: -4px; }
+  select { font: inherit; }
+  table.rt { border-collapse: collapse; margin: 10px 0 0; font-size: 14px; width: 100%; }
+  table.rt th, table.rt td { border: 1px solid #3a3a3a; padding: 6px 8px; text-align: center; }
+  table.rt td:first-child, table.rt th:first-child { text-align: left; white-space: nowrap; }
+  table.rt .no { color: #888; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Vainnor OBS setup</h1>
+  <p>Creates the scenes and browser sources for the overlay pack. It only adds things. Existing scenes and sources are left alone, and nothing is deleted.</p>
+
+  <div class="box">
+    <strong>Before you start</strong>
+    <ol>
+      <li>OBS is open. Go to Tools &gt; WebSocket Server Settings &gt; tick <em>Enable WebSocket server</em>. Note the password (or show the connect info).</li>
+      <li>You are not streaming or recording right now (OBS won't let this page change the canvas while live).</li>
+      <li>Unzip the pack to a permanent folder and have its full path ready.</li>
+    </ol>
+  </div>
+
+  <h2>1. Connect</h2>
+  <div class="row">
+    <div><label for="url">OBS WebSocket address</label><input type="text" id="url" value="ws://127.0.0.1:4455"></div>
+    <div><label for="pw">Password</label><input type="password" id="pw" autocomplete="off"></div>
+  </div>
+  <button id="connect">Connect to OBS</button>
+
+  <h2>2. Theme, pack folder and sources</h2>
+  <label for="theme">Theme</label>
+  <select id="theme"><option value="mono">Mono (black and white)</option><option value="horror">Horror (bone and blood red, gothic)</option><option value="purple">Purple (violet, moon and stars)</option></select>
+  <div class="hint">Scenes are named with the theme, so you can run this again for another theme and keep them all.</div>
+  <label for="path">Pack folder (the folder that contains <em>themes</em> and <em>js</em>, full path)</label>
+  <input type="text" id="path" placeholder="C:\Users\you\Documents\broadcast">
+  <div class="row">
+    <div><label for="game">Game capture source name (optional)</label><input type="text" id="game" placeholder="Game Capture"><div class="hint">Must already exist in OBS. It's placed at the bottom, fitted to the screen.</div></div>
+    <div><label for="cam">Webcam source name (optional)</label><input type="text" id="cam" placeholder="Webcam"><div class="hint">Must already exist. It's placed in the bezel on Gameplay and Just Chatting.</div></div>
+  </div>
+
+  <h2>3. What to create</h2>
+  <div class="box" id="scenes"></div>
+  <label class="check"><input type="checkbox" id="alerts" checked> Put the alerts overlay on top of every scene</label>
+  <label class="check"><input type="checkbox" id="canvas" checked> Set canvas and output to 1920x1080 (frame rate is left alone)</label>
+
+  <h2>4. Audio (BEACN)</h2>
+  <label class="check"><input type="checkbox" id="audio" checked> Set up BEACN audio in OBS</label>
+  <div class="box" id="audiobox">
+    <div class="hint" style="margin-top:0">Each BEACN mix becomes its own OBS audio source on its own track. The device name only needs to <em>contain</em> the text. Untick a row to skip it.</div>
+    <div id="arows"></div>
+  </div>
+  <label class="check"><input type="checkbox" id="a-silence" checked> Take OBS's own Desktop Audio and Mic/Aux off every track (BEACN already carries them, so they'd double up)</label>
+  <label class="check"><input type="checkbox" id="a-output" checked> Set the stream, Twitch VOD and recording tracks in OBS's output settings (only if Output Mode is already Advanced)</label>
+  <label class="check"><input type="checkbox" id="a-all"> Also add the audio to every scene I already have</label>
+  <div class="box">
+    <strong>Set this in the BEACN app (Routing table). I can't change it from here.</strong>
+    <table class="rt">
+      <tr><th></th><th>Mic Relay</th><th>Chat</th><th>Music</th><th>Browser</th><th>Game</th><th>System</th><th>Aux 1</th><th>Aux 2</th></tr>
+      <tr><td>Audience Mix</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+      <tr><td>VOD Track</td><td>&#10003;</td><td>&#10003;</td><td class="no">off</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+      <tr><td>VOD Track 2</td><td>&#10003;</td><td>&#10003;</td><td class="no">off</td><td class="no">off</td><td class="no">off</td><td class="no">off</td><td class="no">off</td><td class="no">off</td></tr>
+      <tr><td>VOD Track 3</td><td class="no">off</td><td class="no">off</td><td class="no">off</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+    </table>
+    <div class="hint">Audience Mix: everything viewers hear live. VOD Track: the same without music (Twitch VOD and clips). VOD Track 2: voices only. VOD Track 3: game and other sound, no voices. A source muted on the Audience Mix can't reach the VOD tracks.</div>
+  </div>
+
+  <button id="plan" disabled>Preview</button>
+  <button id="go" disabled>Create</button>
+
+  <h2>Log</h2>
+  <div id="log">Not connected.</div>
+</main>
+
+<script>
+(function () {
+  var SCENES = [
+    { key: "start",  base: "Starting Soon",      file: "starting-soon.html",   game: false, cam: null, def: true },
+    { key: "game",   base: "Gameplay",           file: "gameplay.html",        game: true,  cam: { x: 64, y: 622, w: 480, h: 270 }, def: true, note: "ultrawide, letterboxed" },
+    { key: "nocam",  base: "Gameplay (no cam)",  file: "gameplay-nocam.html",  game: true,  cam: null, def: true, note: "ultrawide, no webcam" },
+    { key: "g169",   base: "Gameplay 16-9",      file: "gameplay-16x9.html",   game: true,  cam: { x: 64, y: 650, w: 480, h: 270 }, def: false, note: "for a 16:9 game" },
+    { key: "chat",   base: "Just Chatting",      file: "chatting.html",        game: false, cam: { x: 90, y: 170, w: 1180, h: 664 }, def: true },
+    { key: "brb",    base: "BRB",                file: "brb.html",             game: false, cam: null, def: true },
+    { key: "end",    base: "Ending",             file: "ending.html",          game: false, cam: null, def: true },
+    { key: "off",    base: "Offline",            file: "offline.html",         game: false, cam: null, def: true }
+  ];
+  var THEMES = { mono: "Mono", horror: "Horror", purple: "Purple" };
+  function themeKey() { return $("theme").value; }
+  function themeLabel() { return THEMES[themeKey()]; }
+  function nameOf(s) { return "Vainnor " + themeLabel() + " " + s.base; }
+  function alertsName() { return "Vainnor " + themeLabel() + " Alerts overlay"; }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $("log"), ws = null, pending = {}, n = 0, state = null;
+
+  // preset fields from the address (handy for testing): ?pw=...&path=...&game=...&cam=...
+  var q = new URLSearchParams(location.search);
+  ["pw", "path", "game", "cam", "url", "theme"].forEach(function (k) { if (q.get(k)) $(k).value = q.get(k); });
+
+  // ---- scene checklist ----
+  SCENES.forEach(function (s) {
+    var l = document.createElement("label"); l.className = "check";
+    var c = document.createElement("input"); c.type = "checkbox"; c.checked = s.def; c.id = "sc-" + s.key;
+    l.appendChild(c); l.appendChild(document.createTextNode(s.base + (s.note ? "  (" + s.note + ")" : "")));
+    $("scenes").appendChild(l);
+  });
+
+  function log(t) { logEl.textContent += (logEl.textContent ? "\n" : "") + t; logEl.scrollTop = logEl.scrollHeight; }
+  function reset(t) { logEl.textContent = t || ""; }
+
+  // ---- SHA-256 (own copy so it works without secure-context crypto) ----
+  function sha256bytes(str) {
+    var enc = unescape(encodeURIComponent(str)), bytes = [];
+    for (var i = 0; i < enc.length; i++) bytes.push(enc.charCodeAt(i));
+    var K = [], p = 2, c = 0;
+    function isPrime(x) { for (var d = 2; d * d <= x; d++) if (x % d === 0) return false; return true; }
+    while (c < 64) { if (isPrime(p)) { K.push(Math.floor((Math.pow(p, 1 / 3) % 1) * 4294967296) | 0); c++; } p++; }
+    var H = [], pp = 2; c = 0;
+    while (c < 8) { if (isPrime(pp)) { H.push(Math.floor((Math.pow(pp, 0.5) % 1) * 4294967296) | 0); c++; } pp++; }
+    var l = bytes.length * 8; bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    for (var s = 7; s >= 0; s--) bytes.push(s >= 4 ? 0 : (l >>> (s * 8)) & 255);
+    var rotr = function (x, k) { return (x >>> k) | (x << (32 - k)); };
+    for (var o = 0; o < bytes.length; o += 64) {
+      var w = [];
+      for (var t = 0; t < 16; t++) w[t] = (bytes[o + t * 4] << 24) | (bytes[o + t * 4 + 1] << 16) | (bytes[o + t * 4 + 2] << 8) | bytes[o + t * 4 + 3];
+      for (t = 16; t < 64; t++) {
+        var s0 = rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3);
+        var s1 = rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10);
+        w[t] = (w[t - 16] + s0 + w[t - 7] + s1) | 0;
+      }
+      var a = H[0], b = H[1], cc = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (t = 0; t < 64; t++) {
+        var S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25), ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K[t] + w[t]) | 0;
+        var S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22), mj = (a & b) ^ (a & cc) ^ (b & cc);
+        var t2 = (S0 + mj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = cc; cc = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + cc) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    var out = ""; H.forEach(function (x) { for (var k = 3; k >= 0; k--) out += String.fromCharCode((x >>> (k * 8)) & 255); });
+    return out;
+  }
+  function sha64(s) { return btoa(sha256bytes(s)); }
+
+  // ---- OBS WebSocket v5 ----
+  function req(type, data) {
+    return new Promise(function (resolve, reject) {
+      var id = "q" + (++n);
+      var timer = setTimeout(function () { delete pending[id]; reject(new Error(type + ": no answer from OBS")); }, 10000);
+      pending[id] = function (d) {
+        clearTimeout(timer);
+        if (d.requestStatus && d.requestStatus.result) resolve(d.responseData || {});
+        else reject(new Error(type + ": " + ((d.requestStatus && d.requestStatus.comment) || "failed") + " (code " + (d.requestStatus && d.requestStatus.code) + ")"));
+      };
+      ws.send(JSON.stringify({ op: 6, d: { requestType: type, requestId: id, requestData: data || {} } }));
+    });
+  }
+
+  function connect() {
+    reset("Connecting...");
+    return new Promise(function (resolve, reject) {
+      try { ws = new WebSocket($("url").value.trim()); } catch (e) { return reject(e); }
+      var done = false;
+      ws.onerror = function () { if (!done) { done = true; reject(new Error("Could not reach OBS. Is OBS open and the WebSocket server enabled?")); } };
+      ws.onclose = function (ev) { if (!done) { done = true; reject(new Error(ev.code === 4009 ? "Wrong password." : "Connection closed (code " + ev.code + ").")); } };
+      ws.onmessage = function (ev) {
+        var m = JSON.parse(ev.data);
+        if (m.op === 0) {
+          var ident = { rpcVersion: 1, eventSubscriptions: 0 };
+          if (m.d.authentication) {
+            var secret = sha64($("pw").value + m.d.authentication.salt);
+            ident.authentication = sha64(secret + m.d.authentication.challenge);
+          }
+          ws.send(JSON.stringify({ op: 1, d: ident }));
+        } else if (m.op === 2) { done = true; resolve(); }
+        else if (m.op === 7 && pending[m.d.requestId]) { var cb = pending[m.d.requestId]; delete pending[m.d.requestId]; cb(m.d); }
+      };
+    });
+  }
+
+  function refresh() {
+    return Promise.all([req("GetSceneList"), req("GetInputList"), req("GetVideoSettings")]).then(function (r) {
+      state = {
+        scenes: (r[0].scenes || []).map(function (s) { return s.sceneName; }),
+        inputs: (r[1].inputs || []).map(function (i) { return i.inputName; }),
+        video: r[2]
+      };
+    });
+  }
+
+  function joinPath(dir, file) {
+    dir = dir.trim().replace(/^"|"$/g, "").replace(/[\\/]+$/, "");
+    var sep = dir.indexOf("\\") !== -1 || /^[A-Za-z]:/.test(dir) ? "\\" : "/";
+    return dir + sep + "themes" + sep + themeKey() + sep + file;
+  }
+
+  // ---- BEACN audio ----
+  var AUDIO = [
+    { key: "aud",  label: "Audience Mix", want: "Audience Mix", track: 1, input: "BEACN Audience Mix", why: "Everything viewers hear live, music included. This is the stream's audio track." },
+    { key: "vod",  label: "VOD Track",    want: "VOD Track",    track: 2, input: "BEACN VOD Track",    why: "Same mix without music. Goes to your Twitch VOD and clips, and into your recording." },
+    { key: "vod2", label: "VOD Track 2",  want: "VOD Track 2",  track: 3, input: "BEACN VOD Track 2",  why: "Voices only (mic and chat). Local recording only, for fixing voice levels while editing." },
+    { key: "vod3", label: "VOD Track 3",  want: "VOD Track 3",  track: 4, input: "BEACN VOD Track 3",  why: "Game and other sound, no voices. Local recording only." }
+  ];
+  var AUDIO_SCENE = "Vainnor Audio";
+  AUDIO.forEach(function (a) {
+    var row = document.createElement("div"); row.className = "arow";
+    var c = document.createElement("input"); c.type = "checkbox"; c.checked = true; c.id = "a-on-" + a.key;
+    var l = document.createElement("div"); l.className = "lbl"; l.textContent = a.label;
+    var t = document.createElement("input"); t.type = "text"; t.id = "a-want-" + a.key; t.value = a.want;
+    t.setAttribute("aria-label", a.label + " device name contains");
+    var sel = document.createElement("select"); sel.id = "a-track-" + a.key; sel.setAttribute("aria-label", a.label + " OBS track");
+    for (var i = 1; i <= 6; i++) { var o = document.createElement("option"); o.value = i; o.textContent = "Track " + i; if (i === a.track) o.selected = true; sel.appendChild(o); }
+    var w = document.createElement("div"); w.className = "why"; w.textContent = a.why;
+    row.appendChild(c); row.appendChild(l); row.appendChild(t); row.appendChild(sel); row.appendChild(w);
+    $("arows").appendChild(row);
+  });
+  function audioRows() {
+    return AUDIO.filter(function (a) { return $("a-on-" + a.key).checked; }).map(function (a) {
+      return { key: a.key, label: a.label, input: a.input, want: $("a-want-" + a.key).value.trim() || a.want, track: parseInt($("a-track-" + a.key).value, 10), why: a.why };
+    });
+  }
+  function trackMap(n) { var m = {}; for (var i = 1; i <= 6; i++) m[String(i)] = (i === n); return m; }
+  var ALL_OFF = { "1": false, "2": false, "3": false, "4": false, "5": false, "6": false };
+  function matchDevice(items, want) {
+    var w = want.toLowerCase();
+    var hits = items.filter(function (it) {
+      var n = String(it.itemName).toLowerCase();
+      if (n.indexOf(w) === -1) return false;
+      if (w === "vod track" && /vod track ?[2-9]/.test(n)) return false;   // plain "VOD Track" must not grab 2 or 3
+      return true;
+    });
+    return hits[0] || null;
+  }
+
+  function doAudio(createdScenes) {
+    var rows = audioRows(), chain = Promise.resolve(), probeName = null;
+    if (!rows.length) { log("--  audio: no rows ticked"); return chain; }
+    function step(fn) { chain = chain.then(fn); }
+    function safe(label, fn) { step(function () { return Promise.resolve().then(fn).catch(function (e) { log("!!  " + label + ": " + e.message); }); }); }
+
+    safe("OBS version", function () { return req("GetVersion").then(function (v) { log("    OBS " + v.obsVersion + (v.platform ? " on " + v.platform : "")); }); });
+    safe("audio scene", function () {
+      if (state.scenes.indexOf(AUDIO_SCENE) !== -1) { log("--  scene '" + AUDIO_SCENE + "' already exists, reusing it"); return; }
+      return req("CreateScene", { sceneName: AUDIO_SCENE }).then(function () { state.scenes.push(AUDIO_SCENE); log("OK  scene '" + AUDIO_SCENE + "'"); });
+    });
+    rows.forEach(function (r) {
+      safe("input " + r.input, function () {
+        if (state.inputs.indexOf(r.input) !== -1) { log("--  source '" + r.input + "' already exists, reusing it"); probeName = probeName || r.input; return; }
+        return req("CreateInput", { sceneName: AUDIO_SCENE, inputName: r.input, inputKind: "wasapi_input_capture", inputSettings: { device_id: "default" }, sceneItemEnabled: true })
+          .then(function () { state.inputs.push(r.input); probeName = probeName || r.input; });
+      });
+    });
+    var devices = [];
+    safe("device list", function () {
+      if (!probeName) return;
+      return req("GetInputPropertiesListPropertyItems", { inputName: probeName, propertyName: "device_id" }).then(function (r) {
+        devices = r.propertyItems || [];
+        log("    OBS sees " + devices.length + " audio input devices.");
+      });
+    });
+    rows.forEach(function (r) {
+      safe(r.label, function () {
+        var hit = matchDevice(devices, r.want), todo = Promise.resolve();
+        if (hit) todo = req("SetInputSettings", { inputName: r.input, inputSettings: { device_id: hit.itemValue }, overlay: true }).then(function () { log("OK  " + r.label + " = '" + hit.itemName + "' on Track " + r.track); });
+        else log("!!  " + r.label + ": no OBS device name contains '" + r.want + "'. The source was created on the default device. Pick the right device in its Properties. (Devices: " + devices.map(function (d) { return d.itemName; }).join(" | ") + ")");
+        return todo.then(function () {
+          return req("SetInputAudioTracks", { inputName: r.input, inputAudioTracks: trackMap(r.track) });
+        }).then(function () { return req("SetInputAudioMonitorType", { inputName: r.input, monitorType: "OBS_MONITORING_TYPE_NONE" }); })
+          .then(function () { return req("SetInputMute", { inputName: r.input, inputMuted: false }); })
+          .then(function () { return req("SetInputVolume", { inputName: r.input, inputVolumeDb: 0 }); });
+      });
+    });
+
+    // put the audio scene inside the scenes so it's always in the mixer
+    safe("add audio to scenes", function () {
+      var targets = createdScenes.slice();
+      if ($("a-all").checked) state.scenes.forEach(function (n) { if (targets.indexOf(n) === -1) targets.push(n); });
+      targets = targets.filter(function (n) { return n !== AUDIO_SCENE; });
+      var inner = Promise.resolve(), added = 0;
+      targets.forEach(function (sn) {
+        inner = inner.then(function () {
+          return req("GetSceneItemList", { sceneName: sn }).then(function (r) {
+            var has = (r.sceneItems || []).some(function (i) { return i.sourceName === AUDIO_SCENE; });
+            if (has) return;
+            return req("CreateSceneItem", { sceneName: sn, sourceName: AUDIO_SCENE, sceneItemEnabled: true }).then(function (x) {
+              added++;
+              return req("SetSceneItemIndex", { sceneName: sn, sceneItemId: x.sceneItemId, sceneItemIndex: 0 });
+            });
+          });
+        });
+      });
+      return inner.then(function () { log("OK  '" + AUDIO_SCENE + "' added to " + added + " scene" + (added === 1 ? "" : "s")); });
+    });
+
+    if ($("a-silence").checked) safe("OBS default audio", function () {
+      return req("GetSpecialInputs").then(function (sp) {
+        var names = ["desktop1", "desktop2", "mic1", "mic2", "mic3", "mic4"].map(function (k) { return sp[k]; }).filter(Boolean);
+        var inner = Promise.resolve();
+        names.forEach(function (nm) {
+          inner = inner.then(function () { return req("SetInputAudioTracks", { inputName: nm, inputAudioTracks: ALL_OFF }); })
+            .then(function () { return req("SetInputAudioMonitorType", { inputName: nm, monitorType: "OBS_MONITORING_TYPE_NONE" }); });
+        });
+        return inner.then(function () { log(names.length ? "OK  taken off every track: " + names.join(", ") + " (not deleted, tick the tracks again to undo)" : "--  no OBS default audio sources found"); });
+      });
+    });
+
+    if ($("a-output").checked) safe("output tracks", function () {
+      var aud = rows.filter(function (r) { return r.key === "aud"; })[0], vod = rows.filter(function (r) { return r.key === "vod"; })[0];
+      return req("GetProfileParameter", { parameterCategory: "Output", parameterName: "Mode" }).then(function (m) {
+        var mode = m.parameterValue || m.defaultParameterValue;
+        if (mode !== "Advanced") { log("--  Output Mode is '" + mode + "', so the stream, VOD and recording tracks were NOT changed. Switch Settings > Output > Output Mode to Advanced (recheck your encoder and bitrate), then run this again."); return; }
+        var mask = 0; rows.forEach(function (r) { mask |= (1 << (r.track - 1)); });
+        var sets = [];
+        if (aud) sets.push(["TrackIndex", String(aud.track)]);
+        if (vod) { sets.push(["VodTrackEnabled", "true"]); sets.push(["VodTrackIndex", String(vod.track)]); }
+        sets.push(["RecTracks", String(mask)]);
+        var inner = Promise.resolve();
+        sets.forEach(function (kv) { inner = inner.then(function () { return req("SetProfileParameter", { parameterCategory: "AdvOut", parameterName: kv[0], parameterValue: kv[1] }); }); });
+        return inner.then(function () {
+          return Promise.all(sets.map(function (kv) { return req("GetProfileParameter", { parameterCategory: "AdvOut", parameterName: kv[0] }); }));
+        }).then(function (back) {
+          var ok = back.every(function (b, i) { return String(b.parameterValue) === sets[i][1]; });
+          log((ok ? "OK  " : "!!  ") + "output tracks written: stream Track " + (aud ? aud.track : "?") + (vod ? ", Twitch VOD Track " + vod.track : "") + ", recording tracks mask " + mask + (ok ? "" : " (OBS did not echo them back, check Settings > Output)"));
+        });
+      });
+    });
+
+    step(function () {
+      log("\nAudio next steps:");
+      log("  - Set the BEACN routing table as shown on this page (VOD Track 2 and 3 are the new ones).");
+      log("  - Restart OBS so it picks up the output tracks, then open Settings > Output and check: Streaming Audio Track 1, Twitch VOD Track on Track 2, Recording tracks 1 to 4.");
+      log("  - In Settings > Output > Recording choose Hybrid MP4 or MKV (not FLV, which only holds one track).");
+      log("  - Do a 30 second test: play some music, record, then check the file shows 4 audio tracks and Track 2 has no music.");
+    });
+    return chain;
+  }
+
+  function planOf() {
+    var steps = [], dir = $("path").value, game = $("game").value.trim(), cam = $("cam").value.trim();
+    if ($("canvas").checked) {
+      var v = state.video;
+      if (v.baseWidth === 1920 && v.baseHeight === 1080 && v.outputWidth === 1920 && v.outputHeight === 1080) steps.push({ t: "skip", text: "Canvas and output are already 1920x1080" });
+      else steps.push({ t: "video", text: "Set canvas and output to 1920x1080 (now " + v.baseWidth + "x" + v.baseHeight + ")" });
+    }
+    
+    SCENES.forEach(function (s) {
+      if (!$("sc-" + s.key).checked) return;
+      var nm = nameOf(s);
+      if (state.scenes.indexOf(nm) !== -1) { steps.push({ t: "skip", text: "Skip '" + nm + "' (already exists)" }); return; }
+      steps.push({ t: "scene", s: s, nm: nm, text: "Create scene '" + nm + "' with page themes/" + themeKey() + "/" + s.file });
+    });
+    if ($("audio").checked) {
+      var ar = audioRows();
+      steps.push({ t: "audio", text: ar.length ? "Create '" + AUDIO_SCENE + "' with BEACN sources: " + ar.map(function (r) { return r.label + " > Track " + r.track; }).join(", ") +
+        ($("a-silence").checked ? "; take OBS default audio off all tracks" : "") + ($("a-output").checked ? "; set stream/VOD/recording tracks (Advanced mode only)" : "") : "Audio: no rows ticked" });
+    }
+    return { steps: steps, dir: dir, game: game, cam: cam };
+  }
+
+  function preview() {
+    var p = planOf(); reset("Plan:");
+    if (!p.dir.trim()) log("  (enter your pack folder first)");
+    p.steps.forEach(function (s) { log("  - " + s.text); });
+    if (p.game && state.inputs.indexOf(p.game) === -1) log("  ! Game source '" + p.game + "' not found in OBS. It will be skipped.");
+    if (p.cam && state.inputs.indexOf(p.cam) === -1) log("  ! Webcam source '" + p.cam + "' not found in OBS. It will be skipped.");
+    return p;
+  }
+
+  function create() {
+    var p = preview();
+    var anyScene = p.steps.some(function (x) { return x.t === "scene"; });
+    if (anyScene && !p.dir.trim()) return Promise.resolve();
+    var haveGame = p.game && state.inputs.indexOf(p.game) !== -1, haveCam = p.cam && state.inputs.indexOf(p.cam) !== -1;
+    var ALERTS_INPUT = alertsName();
+    var alertsExists = state.inputs.indexOf(ALERTS_INPUT) !== -1;
+    log("\nWorking...");
+    var chain = Promise.resolve(), createdScenes = [];
+
+    function browserSettings(file) {
+      return { is_local_file: true, local_file: joinPath(p.dir, file), width: 1920, height: 1080,
+        fps_custom: true, fps: 60, restart_when_active: true, shutdown: true, reroute_audio: false };
+    }
+    function transform(scene, id, x, y, w, h) {
+      return req("SetSceneItemTransform", { sceneName: scene, sceneItemId: id, sceneItemTransform: {
+        positionX: x, positionY: y, alignment: 5, boundsType: "OBS_BOUNDS_SCALE_INNER", boundsAlignment: 0, boundsWidth: w, boundsHeight: h } });
+    }
+
+    p.steps.forEach(function (st) {
+      if (st.t === "video") {
+        chain = chain.then(function () {
+          return req("SetVideoSettings", { baseWidth: 1920, baseHeight: 1080, outputWidth: 1920, outputHeight: 1080 })
+            .then(function () { log("OK  canvas and output set to 1920x1080"); })
+            .catch(function (e) { log("!!  canvas not changed: " + e.message + " (stop streaming/recording and try again)"); });
+        });
+      } else if (st.t === "audio") {
+        chain = chain.then(function () { return doAudio(createdScenes).catch(function (e) { log("!!  audio: " + e.message); }); });
+      } else if (st.t === "skip") {
+        chain = chain.then(function () { log("--  " + st.text); });
+      } else if (st.t === "scene") {
+        var s = st.s, nm = st.nm;
+        chain = chain.then(function () {
+          return req("CreateScene", { sceneName: nm }).then(function () {
+            var inputName = nm + " (page)";
+            return req("CreateInput", { sceneName: nm, inputName: inputName, inputKind: "browser_source", inputSettings: browserSettings(s.file), sceneItemEnabled: true });
+          }).then(function () {
+            if ($("alerts").checked) {
+              if (!alertsExists) {
+                alertsExists = true;
+                return req("CreateInput", { sceneName: nm, inputName: ALERTS_INPUT, inputKind: "browser_source", inputSettings: browserSettings("alerts.html"), sceneItemEnabled: true });
+              }
+              return req("CreateSceneItem", { sceneName: nm, sourceName: ALERTS_INPUT, sceneItemEnabled: true });
+            }
+          }).then(function () {
+            var next = Promise.resolve();
+            if (s.game && haveGame) next = next.then(function () {
+              return req("CreateSceneItem", { sceneName: nm, sourceName: p.game, sceneItemEnabled: true }).then(function (r) {
+                return transform(nm, r.sceneItemId, 0, 0, 1920, 1080).then(function () { return req("SetSceneItemIndex", { sceneName: nm, sceneItemId: r.sceneItemId, sceneItemIndex: 0 }); });
+              });
+            });
+            if (s.cam && haveCam) next = next.then(function () {
+              return req("CreateSceneItem", { sceneName: nm, sourceName: p.cam, sceneItemEnabled: true }).then(function (r) {
+                return transform(nm, r.sceneItemId, s.cam.x, s.cam.y, s.cam.w, s.cam.h).then(function () { return req("SetSceneItemIndex", { sceneName: nm, sceneItemId: r.sceneItemId, sceneItemIndex: s.game && haveGame ? 1 : 0 }); });
+              });
+            });
+            return next;
+          }).then(function () { log("OK  " + nm); createdScenes.push(nm); })
+            .catch(function (e) { log("!!  " + nm + ": " + e.message); });
+        });
+      }
+    });
+
+    return chain.then(function () {
+      log("\nDone. Next steps:");
+      log("  - Open each scene and check the sources look right.");
+      if (!haveGame) log("  - Add your game capture, set it to Fit to screen, and move it to the bottom of each Gameplay scene.");
+      if (!haveCam) log("  - Add your webcam and place it inside the bezel (Gameplay: 480x270 at x 64, y 622. Just Chatting: 1180x664 at x 90, y 170), under the overlay.");
+      log("  - For the webcam toggle and alerts, fill in js/config.js in the pack folder.");
+      return refresh();
+    });
+  }
+
+  function guard(fn) {
+    return function () { var b = ["connect", "plan", "go"]; b.forEach(function (i) { $(i).disabled = true; });
+      fn().catch(function (e) { log("!!  " + e.message); }).then(function () { if (ws && ws.readyState === 1 && state) { $("plan").disabled = false; $("go").disabled = false; } $("connect").disabled = false; }); };
+  }
+  $("connect").onclick = guard(function () {
+    return connect().then(refresh).then(function () {
+      reset("Connected. OBS canvas is " + state.video.baseWidth + "x" + state.video.baseHeight + ". Found " + state.scenes.length + " scenes and " + state.inputs.length + " sources.\nChoose what to create, then press Preview or Create.");
+    });
+  });
+  $("plan").onclick = guard(function () { return refresh().then(preview); });
+  $("go").onclick = guard(function () { return refresh().then(create); });
+})();
+</script>
+</body>
+</html>

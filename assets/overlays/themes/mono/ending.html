@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Ending</title>
+<link rel="stylesheet" href="css/base.css">
+<style>
+  .title { position: absolute; left: 114px; top: 340px; margin: 0;
+    font-family: var(--display); font-weight: var(--dw); font-stretch: var(--stretch); font-size: calc(168px * var(--ts)); line-height: 0.94;
+    letter-spacing: var(--tr); text-transform: var(--tt); }
+  .title .line { display: block; }
+  .figure { position: absolute; top: 90px; width: 380px; height: 880px; opacity: 0; }
+  .figure.a { left: 1440px; animation: fig-a 23s linear infinite; }
+  .figure.b { left: 1468px; animation: fig-b 23s linear infinite 0.4s; }
+  @keyframes fig-a { 0%, 22% { opacity: 0; transform: translateX(-24px); } 34% { opacity: 0.17; } 36% { opacity: 0.05; } 38% { opacity: 0.2; } 62% { opacity: 0.13; transform: translateX(18px); } 78%, 100% { opacity: 0; transform: translateX(30px); } }
+  @keyframes fig-b { 0%, 24% { opacity: 0; transform: translateX(-10px); } 36% { opacity: 0.09; } 64% { opacity: 0.07; transform: translateX(24px); } 80%, 100% { opacity: 0; transform: translateX(34px); } }
+
+  /* Power-off: the picture collapses to a line, then a dot that fades. */
+  .off { animation: poweroff 1.3s cubic-bezier(.6,0,.4,1) forwards; transform-origin: 50% 50%; }
+  @keyframes poweroff {
+    0%   { transform: scale(1, 1); filter: brightness(1); opacity: 1; }
+    35%  { transform: scale(1, 0.004); filter: brightness(5); opacity: 1; }
+    80%  { transform: scale(0.012, 0.004); filter: brightness(8); opacity: 1; }
+    100% { transform: scale(0, 0.004); opacity: 0; }
+  }
+  .centerdot.run { animation: dot 7s ease-out 1.1s forwards; }
+  @keyframes dot { 0% { opacity: 1; transform: scale(1); } 30% { opacity: 0.9; transform: scale(0.7); } 100% { opacity: 0; transform: scale(0.1); } }
+  @media (prefers-reduced-motion: reduce) { .figure.a { animation: none; opacity: 0.12; } .figure.b { animation: none; opacity: 0.06; } .off, .centerdot.run { animation: none; } }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div id="picture" style="position:absolute;inset:0">
+    <div class="bars" style="opacity:0.08"></div>
+    <div class="themeart"></div>
+    <svg class="figure a" viewBox="0 0 360 880" aria-hidden="true"><use href="#veiled"/></svg>
+    <svg class="figure b" viewBox="0 0 360 880" aria-hidden="true"><use href="#veiled"/></svg>
+
+    <div class="plate" id="plate">
+      <div class="lamp"></div>
+      <div class="state">Transmission ends</div>
+      <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+
+    <h1 class="title ghosted">
+      <span class="g1" aria-hidden="true"><span class="line">Thanks for</span><span class="line">hanging out</span></span>
+      <span class="g2" aria-hidden="true"><span class="line">Thanks for</span><span class="line">hanging out</span></span>
+      <span class="line">Thanks for</span><span class="line">hanging out</span>
+    </h1>
+
+    <div class="bug up"><b></b>Vainnor</div>
+    <div class="crawl" id="crawl"></div>
+    <div class="roll"></div>
+    <div class="grain"></div>
+    <div class="scan"></div>
+    <div class="glass"></div>
+  </div>
+  <div class="centerdot" id="dot"></div>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" style="stop-color:var(--paper)" stop-opacity="1"/><stop offset="0.7" style="stop-color:var(--paper)" stop-opacity="0.85"/><stop offset="1" style="stop-color:var(--paper)" stop-opacity="0.15"/>
+    </linearGradient>
+    <g id="veiled">
+      <path fill="url(#fade)" d="M180 20 C215 20 238 52 238 96 C238 130 226 150 214 166 C250 190 276 230 288 300 C300 380 296 470 312 560 C326 650 346 740 360 840 L330 830 L312 856 L288 832 L262 858 L236 834 L208 860 L182 836 L156 860 L130 834 L104 858 L78 832 L52 856 L30 830 L0 840 C14 740 34 650 48 560 C64 470 60 380 72 300 C84 230 110 190 146 166 C134 150 122 130 122 96 C122 52 145 20 180 20 Z"/>
+      <ellipse cx="180" cy="104" rx="26" ry="40" style="fill:var(--ink)" fill-opacity="0.4"/>
+    </g>
+  </defs>
+</svg>
+<script src="../../js/config.js"></script>
+<script src="../../js/core.js"></script>
+<script>
+  // Meter falls over the hold time, then the picture collapses to a dot.
+  var meter = Signal.meter(document.getElementById("meter"));
+  var hold = Math.max(3, Signal.cfg.endHold) * 1000;
+  var level = 5;
+  var step = setInterval(function () { level -= 1; meter.set(Math.max(0, level)); if (level <= 0) clearInterval(step); }, hold / 5);
+  Signal.crawl(document.getElementById("crawl"));
+  setTimeout(function () {
+    document.getElementById("picture").classList.add("off");
+    document.getElementById("dot").classList.add("run");
+  }, hold);
+</script>
+</body>
+</html>

@@ -15,7 +15,7 @@ let
   };
 in
 {
-  flake.modules.nixos = lib.genAttrs [ "desktop" "gaming" "dev" "privacy" ] forward // {
+  flake.modules.nixos = lib.genAttrs [ "desktop" "gaming" "dev" "privacy" "streaming" ] forward // {
     base = {
       imports = [ inputs.home-manager.nixosModules.home-manager ];
       home-manager = {

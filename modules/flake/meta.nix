@@ -27,6 +27,11 @@
     # One-line theme switch: any name from `ls $(nix build nixpkgs#base16-schemes --print-out-paths)/share/themes`
     theme = "catppuccin-mocha";
 
+    # PipeWire name of your real output (BEACN Studio headphones or the HyperX
+    # dongle), e.g. "alsa_output.usb-....analog-stereo". Run `just audio-devices`
+    # on the PC to list them. null = virtual channels exist but System isn't default.
+    audioOutput = null;
+
     # Public SSH keys allowed to log in (over NetBird only). Paste yours here.
     sshKeys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores vainnor@Carsons-MBP.home"

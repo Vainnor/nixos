@@ -91,14 +91,7 @@
             "SUPER+SHIFT,r,reload_config"
             "SUPER+SHIFT,e,quit"
 
-            # Screenshots: region to clipboard / full screen to ~/Pictures
-            "NONE,Print,spawn_shell,grim -g \"$(slurp)\" - | wl-copy"
-            "SHIFT,Print,spawn_shell,mkdir -p ~/Pictures && grim ~/Pictures/$(date +%F_%T).png"
-
-            # Media keys
-            "NONE,XF86AudioRaiseVolume,spawn,wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
-            "NONE,XF86AudioLowerVolume,spawn,wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
-            "NONE,XF86AudioMute,spawn,wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+            # Media keys (volume keys live in system/audio.nix)
             "NONE,XF86AudioPlay,spawn,playerctl play-pause"
             "NONE,XF86AudioNext,spawn,playerctl next"
             "NONE,XF86AudioPrev,spawn,playerctl previous"

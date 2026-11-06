@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Offline</title>
+<link rel="stylesheet" href="css/base.css">
+<style>
+  .bars { opacity: 0.5; }
+  .card { position: absolute; left: 120px; top: 250px; width: 1180px; height: 560px; box-sizing: border-box; background: var(--ink); border: 3px solid var(--paper); padding: 48px 56px; }
+  .title { font-family: var(--display); font-weight: var(--dw); font-stretch: var(--stretch); font-size: calc(190px * var(--ts)); line-height: 0.92; letter-spacing: var(--tr); text-transform: var(--tt); margin: 0; }
+  .title .line { display: block; }
+  .note { position: absolute; left: 56px; bottom: 44px; right: 56px; font-weight: 700; font-size: calc(36px * var(--bs)); line-height: 1.25; }
+  .figure { position: absolute; top: 90px; left: 1420px; width: 380px; height: 880px; opacity: 0.12; }
+</style>
+</head>
+<body>
+<div class="stage weak" id="stage">
+  <div class="bars"></div>
+    <div class="themeart"></div>
+  <svg class="figure" viewBox="0 0 360 880" aria-hidden="true"><use href="#veiled"/></svg>
+  <div class="plate" id="plate">
+    <div class="lamp" style="animation:none;opacity:0.3"></div>
+    <div class="state">Off air</div>
+    <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  </div>
+  <div class="card hold">
+    <h1 class="title ghosted">
+      <span class="g1" aria-hidden="true"><span class="line">No</span><span class="line">signal</span></span>
+      <span class="g2" aria-hidden="true"><span class="line">No</span><span class="line">signal</span></span>
+      <span class="line">No</span><span class="line">signal</span>
+    </h1>
+    <div class="note">Follow or join the Discord to know when it's back.</div>
+  </div>
+  <div class="bug"><b></b>Vainnor</div>
+  <div class="roll"></div>
+  <div class="grain"></div>
+  <div class="scan"></div>
+  <div class="glass"></div>
+</div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" style="stop-color:var(--paper)" stop-opacity="1"/><stop offset="0.7" style="stop-color:var(--paper)" stop-opacity="0.85"/><stop offset="1" style="stop-color:var(--paper)" stop-opacity="0.15"/>
+    </linearGradient>
+    <g id="veiled">
+      <path fill="url(#fade)" d="M180 20 C215 20 238 52 238 96 C238 130 226 150 214 166 C250 190 276 230 288 300 C300 380 296 470 312 560 C326 650 346 740 360 840 L330 830 L312 856 L288 832 L262 858 L236 834 L208 860 L182 836 L156 860 L130 834 L104 858 L78 832 L52 856 L30 830 L0 840 C14 740 34 650 48 560 C64 470 60 380 72 300 C84 230 110 190 146 166 C134 150 122 130 122 96 C122 52 145 20 180 20 Z"/>
+      <ellipse cx="180" cy="104" rx="26" ry="40" style="fill:var(--ink)" fill-opacity="0.4"/>
+    </g>
+  </defs>
+</svg>
+<script src="../../js/config.js"></script>
+<script src="../../js/core.js"></script>
+<script>Signal.meter(document.getElementById("meter")).set(0);</script>
+</body>
+</html>

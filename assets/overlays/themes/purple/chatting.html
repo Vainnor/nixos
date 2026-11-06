@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Just Chatting</title>
+<link rel="stylesheet" href="css/base.css">
+<style>
+  /* The artwork has a hole cut out where the webcam shows through. */
+  .art { clip-path: polygon(evenodd, 0 0, 1920px 0, 1920px 1080px, 0 1080px, 0 0, 90px 170px, 1270px 170px, 1270px 834px, 90px 834px, 90px 170px); }
+  .figure { position: absolute; top: 90px; left: 1480px; width: 380px; height: 880px; opacity: 0; animation: fig-a 23s linear infinite; }
+  @keyframes fig-a { 0%, 22% { opacity: 0; transform: translateX(-24px); } 34% { opacity: 0.12; } 36% { opacity: 0.04; } 38% { opacity: 0.14; } 62% { opacity: 0.09; transform: translateX(18px); } 78%, 100% { opacity: 0; transform: translateX(30px); } }
+  @media (prefers-reduced-motion: reduce) { .figure { animation: none; opacity: 0.08; } }
+</style>
+</head>
+<body>
+<!-- Webcam goes BELOW this source in OBS, sized 1180 x 664 at x 90, y 170. -->
+<div class="stage clear" id="stage">
+  <div class="art">
+    <div class="bars" style="opacity:0.1"></div>
+    <div class="themeart"></div>
+    <svg class="figure" viewBox="0 0 360 880" aria-hidden="true"><use href="#veiled"/></svg>
+    <div class="roll"></div>
+    <div class="grain"></div>
+    <div class="scan"></div>
+  </div>
+
+  <div class="plate small live" id="plate">
+    <div class="lamp"></div>
+    <div class="state">On air</div>
+    <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="uptime" id="uptime">00:00:00</div>
+  </div>
+
+  <div class="camglass" style="left:90px;top:170px;width:1180px;height:664px"><div class="roll big"></div></div>
+  <div class="bezel" style="left:66px;top:146px;width:1228px;height:712px"></div>
+  <div class="feed" style="left:66px;top:880px"><span class="lamp"></span>Live feed</div>
+
+  <div class="caps" id="caps" style="left:1340px;top:330px;width:520px;height:620px"></div>
+
+  <div class="bug up"><b></b>Vainnor</div>
+  <div class="crawl" id="crawl"></div>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" style="stop-color:var(--paper)" stop-opacity="1"/><stop offset="0.7" style="stop-color:var(--paper)" stop-opacity="0.85"/><stop offset="1" style="stop-color:var(--paper)" stop-opacity="0.15"/>
+    </linearGradient>
+    <g id="veiled">
+      <path fill="url(#fade)" d="M180 20 C215 20 238 52 238 96 C238 130 226 150 214 166 C250 190 276 230 288 300 C300 380 296 470 312 560 C326 650 346 740 360 840 L330 830 L312 856 L288 832 L262 858 L236 834 L208 860 L182 836 L156 860 L130 834 L104 858 L78 832 L52 856 L30 830 L0 840 C14 740 34 650 48 560 C64 470 60 380 72 300 C84 230 110 190 146 166 C134 150 122 130 122 96 C122 52 145 20 180 20 Z"/>
+      <ellipse cx="180" cy="104" rx="26" ry="40" style="fill:var(--ink)" fill-opacity="0.4"/>
+    </g>
+  </defs>
+</svg>
+<script src="../../js/config.js"></script>
+<script src="../../js/core.js"></script>
+<script>
+  var meter = Signal.meter(document.getElementById("meter"));
+  var up = Signal.uptime(document.getElementById("uptime"));
+  Signal.crawl(document.getElementById("crawl"));
+  Signal.chat(document.getElementById("caps"));
+  Signal.events();
+  Signal.bus.on("alert", function () { meter.dip(1400); });
+  Signal.debug([{ label: "Reset clock", fn: function () { up.reset(); } }]);
+</script>
+</body>
+</html>

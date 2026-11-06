@@ -27,6 +27,7 @@
           environment.systemPackages = [
             self.packages.x86_64-linux.install-nixos
             pkgs.git
+            pkgs.just
           ];
           image.baseName = lib.mkForce "nixos-arc-installer";
           services.getty.helpLine = ''

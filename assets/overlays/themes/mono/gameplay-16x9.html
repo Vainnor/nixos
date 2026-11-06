@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Gameplay (16:9 game, full frame)</title>
+<link rel="stylesheet" href="css/base.css">
+</head>
+<body>
+<!-- Transparent scene for a 16:9 game filling the frame. Webcam inside the bezel: 480 x 270 at x 64, y 650. No chat by design. -->
+<div class="stage clear" id="stage">
+  <div class="plate small live" id="plate">
+    <div class="lamp"></div>
+    <div class="state">On air</div>
+    <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="uptime" id="uptime">00:00:00</div>
+  </div>
+
+  <div class="camgroup" id="camgroup">
+    <div class="camglass" style="left:64px;top:650px;width:480px;height:270px"><div class="roll"></div></div>
+    <div class="bezel" style="left:40px;top:626px;width:528px;height:318px"></div>
+    <div class="feed" style="left:40px;top:958px"><span class="lamp"></span>Live feed</div>
+  </div>
+
+  <div class="bug"><b></b>Vainnor</div>
+</div>
+<script src="../../js/config.js"></script>
+<script src="../../js/core.js"></script>
+<script>
+  var meter = Signal.meter(document.getElementById("meter"));
+  var up = Signal.uptime(document.getElementById("uptime"));
+  Signal.events();
+  Signal.bus.on("alert", function () { meter.dip(1400); });
+
+  var group = document.getElementById("camgroup"), shown = null;
+  var cam = Signal.camera(function (on) {
+    if (on === shown) return;
+    var first = shown === null; shown = on;
+    if (on) { group.style.display = "block"; group.classList.remove("cam-out"); if (!first) group.classList.add("cam-in"); }
+    else { group.classList.remove("cam-in"); if (first) { group.style.display = "none"; return; } group.classList.add("cam-out"); setTimeout(function () { if (!shown) { group.style.display = "none"; } }, 420); }
+  });
+  Signal.debug([{ label: "Toggle cam", fn: function () { cam.toggle(); } }, { label: "Reset clock", fn: function () { up.reset(); } }]);
+</script>
+</body>
+</html>

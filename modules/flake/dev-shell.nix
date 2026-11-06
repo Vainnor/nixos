@@ -10,6 +10,7 @@
           nixfmt
           nix-output-monitor
           git
+          just
         ];
       };
     };

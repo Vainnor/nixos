@@ -13,6 +13,7 @@ in
       gaming
       dev
       privacy
+      streaming
       arc
     ];
   };

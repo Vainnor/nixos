@@ -45,7 +45,11 @@ in
           };
         };
 
-        environment.systemPackages = [ pkgs.nix-output-monitor ];
+        environment.systemPackages = with pkgs; [
+          nix-output-monitor
+          just # recipes in the repo's justfile
+          mkpasswd # `just password`
+        ];
       };
     };
 }

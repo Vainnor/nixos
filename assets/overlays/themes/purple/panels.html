@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vainnor · Panel headers</title>
+<link rel="stylesheet" href="css/base.css">
+<style>
+  body { background: #333; padding: 20px; display: flex; flex-direction: column; gap: 20px; width: 320px; }
+  .panel { position: relative; width: 320px; height: 112px; overflow: hidden; background: var(--ink); color: var(--paper); flex: none; }
+  .panel .strip { position: absolute; left: 0; right: 0; bottom: 0; height: 9px;
+    background: var(--bars); }
+  .panel .top { position: absolute; left: 20px; right: 20px; top: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .panel .top i { display: block; width: 12px; height: 12px; background: var(--paper); }
+  .panel .top span { font: 700 calc(15px * var(--bs)) var(--body); letter-spacing: 0.2em; }
+  .panel .t { position: absolute; left: 20px; top: 42px; font-family: var(--display); font-weight: var(--dw); font-stretch: var(--stretch); font-size: calc(29px * var(--ts)); line-height: 1; text-transform: var(--tt); letter-spacing: var(--tr); white-space: nowrap; }
+  .panel .t .g1, .panel .t .g2 { position: absolute; left: 0; top: 0; }
+  .panel .t .g1 { opacity: 0.28; transform: translate(-3px, 0); }
+  .panel .t .g2 { opacity: 0.16; transform: translate(4px, 1px); }
+  .panel .grain { animation: none; left: 0; top: 0; width: 320px; height: 112px; opacity: 0.55; background-position: var(--gx, 0) var(--gy, 0); }
+  .panel .scan { background: repeating-linear-gradient(180deg, rgba(0,0,0,0) 0, rgba(0,0,0,0) 1px, rgba(0,0,0,0.3) 2px, rgba(0,0,0,0) 3px); }
+  .panel .rollx { position: absolute; left: 0; width: 320px; height: 40px; background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.09), rgba(255,255,255,0)); }
+</style>
+</head>
+<body>
+<div class="panel" id="p1" style="--gx:0px;--gy:0px"><div class="top"><i></i><span>01</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">About me</span><span class="g2" aria-hidden="true">About me</span>About me</div><div class="rollx" style="top:60px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+<div class="panel" id="p2" style="--gx:-40px;--gy:-90px"><div class="top"><i></i><span>02</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">Chat rules</span><span class="g2" aria-hidden="true">Chat rules</span>Chat rules</div><div class="rollx" style="top:22px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+<div class="panel" id="p3" style="--gx:-120px;--gy:-30px"><div class="top"><i></i><span>03</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">FAQ</span><span class="g2" aria-hidden="true">FAQ</span>FAQ</div><div class="rollx" style="top:48px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+<div class="panel" id="p4" style="--gx:-70px;--gy:-150px"><div class="top"><i></i><span>04</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">Support</span><span class="g2" aria-hidden="true">Support</span>Support</div><div class="rollx" style="top:70px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+<div class="panel" id="p5" style="--gx:-200px;--gy:-60px"><div class="top"><i></i><span>05</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">Milestones</span><span class="g2" aria-hidden="true">Milestones</span>Milestones</div><div class="rollx" style="top:30px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+<div class="panel" id="p6" style="--gx:-10px;--gy:-200px"><div class="top"><i></i><span>06</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">My setup</span><span class="g2" aria-hidden="true">My setup</span>My setup</div><div class="rollx" style="top:56px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+<div class="panel" id="p7" style="--gx:-160px;--gy:-120px"><div class="top"><i></i><span>07</span></div><div class="t ghosted"><span class="g1" aria-hidden="true">Commands</span><span class="g2" aria-hidden="true">Commands</span>Commands</div><div class="rollx" style="top:36px"></div><div class="strip"></div><div class="grain"></div><div class="scan"></div></div>
+</body>
+</html>
