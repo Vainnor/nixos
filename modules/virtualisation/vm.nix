@@ -237,6 +237,9 @@ in
             pkgs.kmod
             pkgs.systemd
             pkgs.psmisc
+            pkgs.efibootmgr
+            pkgs.gnugrep
+            pkgs.gnused
           ]
         }
         taken=/run/${vmName}-gpu-taken
@@ -278,6 +281,9 @@ in
             # Windows shut down (or failed to start). If the GPU went to the VM,
             # reboot into Linux; otherwise just bring the desktop back.
             if [ -e "$taken" ]; then
+              # The firmware's default may be Windows Boot Manager; come back to NixOS.
+              entry=$(efibootmgr | grep -i 'Linux Boot Manager' | head -1 | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/p')
+              if [ -n "$entry" ]; then efibootmgr --bootnext "$entry" >/dev/null || true; fi
               systemctl --no-block reboot
             else
               restore_desktop
