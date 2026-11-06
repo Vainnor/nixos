@@ -1,7 +1,9 @@
 # nixos
 
-NixOS for **arc** (Ryzen 7 9800X3D · RX 7900 XTX · 32 GB), dual-booting with Windows on a separate drive.
+NixOS for **arc** (Ryzen 7 9800X3D · RX 7900 XTX · 32 GB), dual-booting with Windows on a separate drive,
+plus the MacBook through nix-darwin (same shell, git and theme).
 Mango (Wayland) · Ghostty · fuzzel · waybar · LibreWolf · Stylix theming · LUKS + btrfs.
+Open items are in [TODO.md](TODO.md).
 
 ## Layout (dendritic)
 
@@ -12,13 +14,15 @@ Files and folders whose path contains `/_` (for example `hosts/arc/_disko.nix`) 
 
 | Aspect    | What's in it                                                                   |
 |-----------|--------------------------------------------------------------------------------|
-| `base`    | nix, boot, security, networking + NetBird, SSH (NetBird only), user, shell     |
-| `desktop` | mango, greetd, waybar, fuzzel, mako, swaylock, audio, theme, apps              |
-| `gaming`  | Steam + Proton-GE, gamescope, gamemode, MangoHud, amdgpu/LACT                  |
+| `base`    | nix, boot, security, networking + NetBird, SSH (NetBird only), user, shell, backups, USBGuard, monitoring |
+| `desktop` | mango, greetd, waybar, fuzzel, swaync, swayosd, swaylock, Plymouth, audio, theme, 1Password, apps |
+| `gaming`  | Steam + Proton-GE, gamescope, gamemode, MangoHud, amdgpu/LACT, instant replay, Sunshine, scx_lavd, controllers |
 | `dev`     | Zed, vis, git, direnv, nix-ld, rootless Docker                                 |
 | `privacy` | i2pd                                                                           |
 | `vm`      | libvirt + virt-manager, Windows 11 VM with the 7900 XTX passed through          |
-| `streaming` | OBS with the Vainnor overlays (`assets/overlays`), 3 theme scene collections, BEACN-style tracks |
+| `streaming` | OBS with the Vainnor overlays (`assets/overlays`), 3 theme scene collections, BEACN-style tracks, OBS hotkeys, mic chain |
+
+The Mac (`hosts/mac`) uses the `darwin.base` aspect, which brings in the home-manager `base` and `dev` halves only.
 
 `modules/hosts/arc/default.nix` picks the aspects for this machine. Shared values (username,
 theme, time zone, SSH keys) live in `modules/flake/meta.nix`. **Change `theme` there to re-theme everything.**
@@ -73,6 +77,24 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 2. On the Mac, run `just secrets-add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
 3. Run `just secrets-edit` to fill in real values, then `just commit "..."` and `just deploy`.
 
+What's in there: the Twitch key and StreamElements token, the WinApps password, your Wi-Fi (`wifi/ssid`, `wifi/psk`), a NetBird setup key (`netbird/setup_key`, so the PC joins the mesh by itself) and the restic target (see Backups).
+
+### 1Password
+Sign in once, then in *Settings > Developer* turn on **Use the SSH agent** and **Integrate with 1Password CLI**. SSH and git signing then go through 1Password, and the LibreWolf extension connects to the app. Commits are signed with `meta.signingKey`; add it on GitHub as a **signing key** so they show as Verified. The key has to be in your 1Password vault, otherwise `git commit` fails.
+
+### Backups
+- **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `just snapshots` lists them; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
+- **restic to the homelab**: put the repository URL, a password and (for S3/MinIO) keys in `restic/*` with `just secrets-edit`, then set `meta.resticReady = true` and deploy. It runs nightly at 03:30 (or at the next boot if the PC was off). `just backup` runs it now, `just restore <path>` gets files back.
+
+### Monitoring
+Add `arc.netbird.cloud:9100` (node exporter) and `arc.netbird.cloud:9633` (SMART) as scrape targets in the homelab's Prometheus. Both ports are only open on NetBird.
+
+### Sunshine (game streaming)
+Open `https://localhost:47990` on the PC, create the admin login, then pair Moonlight (Mac, phone, TV) with the PIN it shows. Works over NetBird when you're away.
+
+### USB devices
+Devices that are plugged in at boot always work, and everything connected on the first boot is remembered. A new device plugged in later is blocked and a notification says so: `just usb` shows it, `just usb-allow <n>` allows it for good.
+
 ### Windows VM with the GPU
 1. Run `just vm-gpu` and `just vm-usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `just switch`.
 2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`. Then run `just vm-virtio`, `just vm-disk 250G` and `just vm-setup`.
@@ -123,16 +145,38 @@ Run `just` to see all recipes. The common ones:
 | `just windows` | Start the Windows VM with the GPU passed through |
 | `just audio-devices` | List audio outputs (set the real one as `meta.audioOutput`) |
 | `just obs-reset` | Back up OBS settings and re-seed the Vainnor profile/scenes |
+| `just snapshots` / `just snapshot` | List the hourly snapshots / take one now |
+| `just backup` / `just restore <path>` | Run the restic backup now / restore a path to `/tmp/restore` |
+| `just usb` / `just usb-allow <n>` | List USB devices / allow a blocked one |
+| `just mac` / `just mac-build` | Switch / build the Mac (nix-darwin) |
+
+### Keys worth knowing
+| Keys | What it does |
+|---|---|
+| Super+Space · Super+; · Super+C · Super+/ | Apps · emoji · calculator · find a file |
+| Super+Shift+N · Super+Alt+N | Notification panel · night light on/off |
+| Super+Shift+F | Thunar (Super+E is yazi) |
+| Alt+F10 · Alt+F9 | Save the last 2 minutes · the last 30 seconds (instant replay, `~/Videos/Replays`) |
+| Super+F1…F8 | OBS: switch scene |
+| Super+F9 · Super+F10 · Super+Shift+F12 | OBS: record on/off · mic mute · **stream** on/off |
+
+## The Mac
+nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with signing, direnv, vis and the Stylix theme. It leaves apps, Homebrew, Zed's settings, `~/.ssh/config` and your `starship.toml` alone. Files it takes over (like `~/.config/fish/config.fish`) are kept next to it as `*.hm-backup`.
+
+First time:
+1. `sudo mv /etc/nix/nix.conf /etc/nix/nix.conf.before-nix-darwin` (nix-darwin manages it from now on). If it also complains about `/etc/bashrc` or `/etc/zshrc`, move those the same way.
+2. `sudo nix --extra-experimental-features 'nix-command flakes' run nix-darwin -- switch --flake ~/Programing/nixos`
+3. After that, `just mac`. Touch ID works for `sudo`.
 
 ## Streaming
 
 On first launch OBS opens the **Vainnor** profile and the **Vainnor Purple** scene collection.
 Mono and Horror are under *Scene Collection*. You still have to:
 1. Run `just audio-devices` and put your real output in `meta.audioOutput`, then `just switch`. This makes **System** the default output, so all app audio reaches OBS.
-2. In pwvucontrol, move each app to its channel: games to **Game**, Vesktop/TeamSpeak to **Chat**, Spotify to **Music**, LibreWolf to **Browser**. Set the BEACN mic as the default input.
+2. In pwvucontrol, move each app to its channel: games to **Game**, Vesktop/TeamSpeak to **Chat**, Cider to **Music**, LibreWolf to **Browser**. Set the BEACN mic as the default input. EasyEffects cleans it up (noise removal, gate, compressor, limiter) and OBS records the cleaned **Easy Effects Source**.
 3. In OBS: add your Twitch stream key or account (*Settings > Stream*), and pick the Brio in the **Webcam** source if it isn't already selected.
 4. In Steam, set each game's launch options to `obs-gamecapture %command%` so **Game Capture** sees it.
-5. Optional: put your StreamElements ID and JWT in `~/.local/share/vainnor-overlays/js/config.js`. That file is never committed to git.
+5. Optional: put your StreamElements ID and JWT in the secrets (`streamelements/*`). They're written into the overlays' `config.js` at every switch, and that file is never committed.
 
 Audio tracks: 1 Audience (everything), 2 VOD (no music), 3 voices, 4 game + other. The stream uses Track 1, the Twitch VOD uses Track 2, and recordings get all four.
 
