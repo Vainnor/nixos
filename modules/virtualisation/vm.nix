@@ -18,8 +18,12 @@
 #   RAM, its own disk. Graphics are a virtio display, with Windows' built-in
 #   software renderer handling Direct3D: fine for office tools, utilities and
 #   2D apps; not for games or heavy 3D. Clipboard sharing and auto-resize come
-#   from the SPICE guest tools (install from https://www.spice-space.org/download.html).
+#   from the SPICE agent, which the first-login script installs.
 #   It's always available; it doesn't need meta.vfio.
+#
+# Both install hands-off from a new disk image: an answer file on an extra CD
+# gives Windows 11 Pro with a local account and privacy settings turned down
+# (see _unattend.nix).
 #
 # Games with kernel anti-cheat (Valorant, many shooters) refuse VMs: boot
 # Windows natively for those (F11 or the power menu's "Reboot to Windows").
@@ -59,6 +63,22 @@ in
           );
 
       imagesDir = "/var/lib/libvirt/images";
+
+      # Answer file + first-login script for a hands-off install (see _unattend.nix).
+      unattendIso =
+        name: winapps:
+        import ./_unattend.nix {
+          inherit pkgs winapps;
+          user = meta.windowsUser;
+          computerName = name;
+        };
+      unattendCd = dev: name: winapps: ''
+        <disk type="file" device="cdrom">
+          <driver name="qemu" type="raw"/>
+          <source file="${unattendIso name winapps}"/>
+          <target dev="${dev}" bus="sata"/>
+          <readonly/>
+        </disk>'';
       installMedia = ''
         <disk type="file" device="cdrom">
           <driver name="qemu" type="raw"/>
@@ -123,7 +143,7 @@ in
         if vfio.windowsNvme or null != null then
           hostdev vfio.windowsNvme
         else
-          imageDisk vmName + installMedia;
+          imageDisk vmName + installMedia + unattendCd "sdd" vmName false;
 
       domainXml = pkgs.writeText "${vmName}.xml" ''
         <domain type="kvm">
@@ -175,6 +195,7 @@ in
               <target dev="sdd" bus="sata"/>
               <readonly/>
             </disk>
+            ${unattendCd "sde" liteName true}
             <video><model type="virtio" heads="1" primary="yes"/></video>
             <graphics type="spice" autoport="yes">
               <listen type="none"/>

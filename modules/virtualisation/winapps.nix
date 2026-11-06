@@ -2,8 +2,8 @@
 # desktop (RDP RemoteApp). They show up in fuzzel like any other app.
 #
 # Needs Windows 11 **Pro** (Home has no RDP server) with a password login
-# (not a PIN) for meta.windowsUser. One-time guest setup: open the WINAPPS CD
-# in the VM, right-click install.bat > Run as administrator, reboot the VM.
+# (not a PIN) for meta.windowsUser. The unattended install runs the guest
+# setup (install.bat from the WINAPPS CD) at first login; see _unattend.nix.
 # Then on Linux: `just winapps-setup` picks which apps to add.
 #
 # The RDP password comes from sops (winapps/rdp_password) when secrets are

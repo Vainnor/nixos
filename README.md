@@ -235,8 +235,15 @@ gives up on it after 5 seconds and carries on. `just cache-push` pushes the runn
 `win11-lite` is for small Windows-only apps. It runs in a window on your Linux desktop and uses 4 cores / 8 threads and 8 GB of RAM. Graphics are a basic virtual display, so it handles office tools and 2D apps but not games.
 1. Run `just vm-setup` (once), `just vm-virtio` and `just vm-disk win11-lite 80G`.
 2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`, then run `just windows-lite`.
-3. Install Windows, loading the storage driver from the virtio CD.
-4. Inside Windows, install `virtio-win-guest-tools.exe` from the same CD and the [SPICE guest tools](https://www.spice-space.org/download.html). They give you shared clipboard, auto-resize and a proper display driver.
+3. Pick the 80 GB disk when Setup asks where to install. Everything else is automatic: Windows 11 Pro, a local account named `meta.windowsUser` (no Microsoft account), and privacy settings turned down.
+4. Log in with the password `changeme`. A first-login script then:
+   - turns telemetry down to the minimum Pro allows, and switches off ads, suggestions, Copilot, Recall, web search in Start, activity history and location;
+   - removes OneDrive and the preinstalled store apps;
+   - installs the virtio drivers, the guest agent and the SPICE agent (clipboard, auto-resize);
+   - in `win11-lite`, sets up WinApps.
+5. The VM restarts after a minute. At the next login, Windows asks you to choose your own password.
+
+The answer file is in `modules/virtualisation/_unattend.nix`. The full `win11` VM gets the same treatment when it installs onto a new disk image (not when it boots your real Windows drive). If you've already defined the VMs, run `just vm-setup` again to pick up changes.
 
 `just windows-lite-stop` shuts it down. The two Windows VMs have separate disks, so they don't affect each other.
 
@@ -246,8 +253,8 @@ gives up on it after 5 seconds and carries on. `just cache-push` pushes the runn
 <summary><b>WinApps (Windows apps as Linux windows)</b></summary>
 
 WinApps runs apps from `win11-lite` as separate windows on your desktop (over RDP RemoteApp). They appear in fuzzel like normal apps.
-1. Use **Windows 11 Pro** in `win11-lite`; Home has no RDP. Log in to the account named in `meta.windowsUser` with a **password**, not a PIN.
-2. In the VM, open the **WINAPPS** CD, right-click `install.bat`, choose *Run as administrator*, then reboot the VM.
+1. `win11-lite` installs as Windows 11 **Pro** (Home has no RDP), with the account named in `meta.windowsUser`. Log in with a **password**, not a PIN.
+2. The first-login script already ran the WINAPPS setup. To redo it, open the **WINAPPS** CD in the VM, right-click `install.bat`, choose *Run as administrator*, and reboot.
 3. Set the password: run `just secrets-edit` and fill in `winapps.rdp_password`. If secrets aren't set up yet, fuzzel asks for the password instead.
 4. With the VM running, run `just winapps-setup` and pick apps. Later, `just winapps-add` adds apps you install, and `just winapps-desktop` opens the whole Windows desktop.
 
