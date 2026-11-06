@@ -230,6 +230,29 @@ let
           # ── WinApps: RDP RemoteApp settings from the WINAPPS CD ──
           $wa = Find-OnDiscs 'RDPApps.reg'
           if ($wa) { Start-Process cmd.exe -ArgumentList '/c', (Join-Path (Split-Path $wa) 'install.bat') -Wait }
+
+          # ── Software OpenGL 4.6 (Mesa llvmpipe) for apps that need it, like CRC ──
+          # There's no GPU here. Windows' system-wide OpenGL driver hook doesn't
+          # work on current builds, so the DLLs go next to the app's .exe instead,
+          # checked at every login (a CRC update can replace its folder).
+          $mesa = Find-OnDiscs 'mesa\opengl32.dll'
+          if ($mesa) {
+            New-Item -ItemType Directory -Force 'C:\Tools\mesa\x64' | Out-Null
+            Copy-Item (Join-Path (Split-Path $mesa) '*.dll') 'C:\Tools\mesa\x64\' -Force
+            [Environment]::SetEnvironmentVariable('GALLIUM_DRIVER', 'llvmpipe', 'Machine')
+            Set-Content 'C:\Tools\mesa\crc-opengl.ps1' -Value @(
+              '$crc = Join-Path $env:LOCALAPPDATA "CRC\Application"',
+              'if (Test-Path (Join-Path $crc "CRC.exe")) {',
+              '  foreach ($f in "opengl32.dll", "libgallium_wgl.dll") {',
+              '    $src = Join-Path "C:\Tools\mesa\x64" $f; $dst = Join-Path $crc $f',
+              '    if (-not (Test-Path $dst) -or (Get-Item $src).Length -ne (Get-Item $dst).Length) { Copy-Item $src $dst -Force }',
+              '  }',
+              '}')
+            $act = New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Tools\mesa\crc-opengl.ps1'
+            Register-ScheduledTask -TaskName 'CRC OpenGL' -Action $act -Force `
+              -Trigger (New-ScheduledTaskTrigger -AtLogOn -User '${user}') `
+              -Principal (New-ScheduledTaskPrincipal -UserId '${user}' -LogonType Interactive) | Out-Null
+          }
         ''
       else
         ""
@@ -239,10 +262,28 @@ let
     Stop-Transcript
     shutdown /r /t 60 /c "Setup finished. Restarting in a minute; at the next login you pick your own password."
   '';
+
+  # Mesa's Windows build (llvmpipe): the two DLLs an app needs for OpenGL 4.6.
+  # 26.2.6's MSVC package shipped without OpenGL, so this stays on 26.2.5.
+  mesa =
+    pkgs.runCommand "mesa-llvmpipe-win64"
+      {
+        nativeBuildInputs = [ pkgs._7zz ];
+        src = pkgs.fetchurl {
+          url = "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.5/mesa3d-26.2.5-release-msvc.7z";
+          hash = "sha256-mXEj70zoiWIEq5EtW1Txk3LEh/+YNbzvr6L8ojuJU8I=";
+        };
+      }
+      ''
+        7zz x -y "$src" x64/opengl32.dll x64/libgallium_wgl.dll >/dev/null
+        mkdir $out
+        cp x64/opengl32.dll x64/libgallium_wgl.dll $out/
+      '';
 in
 pkgs.runCommand "unattend-${computerName}.iso" { nativeBuildInputs = [ pkgs.xorriso ]; } ''
   mkdir cd
   cp ${pkgs.writeText "autounattend.xml" xml} cd/autounattend.xml
   cp ${pkgs.writeText "setup.ps1" ps1} cd/setup.ps1
+  ${if winapps then "mkdir cd/mesa && cp ${mesa}/*.dll cd/mesa/" else ""}
   xorriso -as mkisofs -quiet -J -R -V UNATTEND -o $out cd
 ''

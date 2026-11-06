@@ -241,6 +241,7 @@ gives up on it after 5 seconds and carries on. `just cache-push` pushes the runn
    - removes OneDrive and the preinstalled store apps;
    - installs the virtio drivers, the guest agent and the SPICE agent (clipboard, auto-resize);
    - in `win11-lite`, sets up WinApps.
+   - in `win11-lite`, adds software OpenGL 4.6 (Mesa llvmpipe) for CRC. There's no GPU in this VM, so apps that need OpenGL 3.2+ would otherwise refuse to start. The DLLs sit next to `CRC.exe` and are put back at every login if a CRC update removes them. For another app, copy `C:\Tools\mesa\x64\*.dll` next to its `.exe`.
 5. The VM restarts after a minute. At the next login, Windows asks you to choose your own password.
 
 The answer file is in `modules/virtualisation/_unattend.nix`. The full `win11` VM gets the same treatment when it installs onto a new disk image (not when it boots your real Windows drive). If you've already defined the VMs, run `just vm-setup` again to pick up changes.
