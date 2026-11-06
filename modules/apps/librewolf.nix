@@ -8,7 +8,7 @@
 { config, ... }:
 let
   inherit (config) meta;
-  palette = import ../../assets/themes meta.theme;
+  palette = import ../../assets/themes meta;
 
   sidebery = "{3c078156-979c-498b-8990-85f7987dd929}";
   stylus = "{7a7a4a92-a2a0-41d1-9fd7-1e92480d612d}";

@@ -131,6 +131,46 @@ cache-push:
 repl:
     {{ nix }} repl {{ flake }}#nixosConfigurations.{{ host }}
 
+# ── Wallpaper and colours ──────────────────────────────────────────────
+
+# List the wallpapers (the current one is marked)
+wallpapers:
+    #!/usr/bin/env bash
+    cur=$(sed -n 's/^ *wallpaper = "\(.*\)";/\1/p' modules/flake/meta.nix)
+    for d in assets/wallpapers/*/; do n=$(basename "$d"); [ "$n" = "$cur" ] && echo "* $n" || echo "  $n"; done
+
+# Switch wallpaper and colours on this machine: `just wallpaper pinewood` (no name: pick from a list)
+wallpaper name="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    n="{{ name }}"
+    if [ -z "$n" ]; then
+      n=$(ls assets/wallpapers | {{ nix }} run nixpkgs#fzf -- --prompt "wallpaper > " --height 15) || exit 0
+    fi
+    [ -f "assets/wallpapers/$n/wide.png" ] || { echo "No wallpaper '$n'. See: just wallpapers"; exit 1; }
+    sed -i.bak -e "s|^\( *\)wallpaper = .*;|\1wallpaper = \"$n\";|" -e "s|^\( *\)theme = .*;|\1theme = \"match\";|" modules/flake/meta.nix
+    rm -f modules/flake/meta.nix.bak
+    git add -A assets/wallpapers modules/flake/meta.nix
+    if [ "$(uname)" = Darwin ]; then just mac; else nh os switch {{ flake }}; fi
+    echo "Now: $n. Commit it with: just commit 'style: wallpaper $n'"
+
+# Add a wallpaper: `just wallpaper-add forest ~/Downloads/wide.png ~/Downloads/4k.png` (makes a matching palette)
+wallpaper-add name wide uhd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="assets/wallpapers/{{ name }}"
+    mkdir -p "$d"
+    py='with import (builtins.getFlake "nixpkgs") {}; python3.withPackages (p: [ p.pillow ])'
+    {{ nix }} shell --impure --expr "$py" -c python3 -I - "{{ wide }}" "$d/wide.png" <<'PY'
+    import sys; from PIL import Image; Image.open(sys.argv[1]).convert("RGB").save(sys.argv[2])
+    PY
+    {{ nix }} shell --impure --expr "$py" -c python3 -I - "{{ uhd }}" "$d/4k.png" <<'PY'
+    import sys; from PIL import Image; Image.open(sys.argv[1]).convert("RGB").save(sys.argv[2])
+    PY
+    {{ nix }} shell --impure --expr "$py" -c python3 -I scripts/wallpaper-palette.py "$d/wide.png" --name "{{ name }}" > "$d/theme.nix"
+    git add "$d"
+    echo "Added $d. Tweak $d/theme.nix if a colour feels off, then: just wallpaper {{ name }}"
+
 # ── Streaming / audio ──────────────────────────────────────────────────
 
 # List audio outputs; put the real one's name in meta.audioOutput

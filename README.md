@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/Vainnor/nixos/actions/workflows/secrets.yml"><img alt="secrets" src="https://github.com/Vainnor/nixos/actions/workflows/secrets.yml/badge.svg?branch=main"></a>
-  <img alt="NixOS: 26.11" src="https://img.shields.io/badge/NixOS-26.11-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> <img alt="nix-darwin: Mac" src="https://img.shields.io/badge/nix--darwin-Mac-B5A8F5?style=flat-square&labelColor=1D232E&logo=apple&logoColor=F5F7FB"> <img alt="theme: vainnor slate" src="https://img.shields.io/badge/theme-vainnor%20slate-243142?style=flat-square&labelColor=1D232E">
+  <img alt="NixOS: 26.11" src="https://img.shields.io/badge/NixOS-26.11-B5A8F5?style=flat-square&labelColor=1D232E&logo=nixos&logoColor=F5F7FB"> <img alt="nix-darwin: Mac" src="https://img.shields.io/badge/nix--darwin-Mac-B5A8F5?style=flat-square&labelColor=1D232E&logo=apple&logoColor=F5F7FB"> <img alt="theme: matches the wallpaper" src="https://img.shields.io/badge/theme-matches%20the%20wallpaper-243142?style=flat-square&labelColor=1D232E">
 </p>
 <p align="center">
   <img alt="aspects: 7" src="https://img.shields.io/badge/aspects-7-B5A8F5?style=flat-square&labelColor=1D232E"> <img alt="modules: 60" src="https://img.shields.io/badge/modules-60-B5A8F5?style=flat-square&labelColor=1D232E"> <a href="TODO.md"><img alt="read: the todo list" src="https://img.shields.io/badge/read-the%20todo%20list-243142?style=flat-square&labelColor=1D232E"></a>
@@ -37,9 +37,8 @@ is just the list of aspects it picks.
 
 Shared values (user, theme, wallpaper, monitors, audio output, VFIO addresses) live in
 `modules/flake/meta.nix`. **Change `theme` there and everything re-themes.** The look is flat
-and square everywhere (no rounded corners, shadows or blur, lowercase text labels). The palette is
-`vainnor-slate`, the same one as the homelab and LibreWolf; `caelus` is a warm alternative, and any
-base16 name works too. Palettes live in `assets/themes/`.
+and square everywhere (no rounded corners, shadows or blur, lowercase text labels), and the colours
+come from the wallpaper (see [Wallpapers](#wallpapers)).
 
 ## Built with
 
@@ -58,7 +57,7 @@ Versions are the ones pinned in `flake.lock` today; `just update` moves them.
 |  | <img alt="LibreWolf: 159.0" src="https://img.shields.io/badge/LibreWolf-159.0-B5A8F5?style=flat-square&labelColor=1D232E&logo=librewolf&logoColor=F5F7FB"> | `159.0` |
 |  | <img alt="fuzzel: 1.15.0" src="https://img.shields.io/badge/fuzzel-1.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.15.0` |
 |  | <img alt="Waybar: 0.15.0" src="https://img.shields.io/badge/Waybar-0.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.15.0` |
-|  | <img alt="Stylix: vainnor slate" src="https://img.shields.io/badge/Stylix-vainnor%20slate-243142?style=flat-square&labelColor=1D232E"> |  |
+|  | <img alt="Stylix: from the wallpaper" src="https://img.shields.io/badge/Stylix-from%20the%20wallpaper-243142?style=flat-square&labelColor=1D232E"> |  |
 | **Graphics** | <img alt="Mesa RADV: 26.2.6" src="https://img.shields.io/badge/Mesa%20RADV-26.2.6-B5A8F5?style=flat-square&labelColor=1D232E&logo=amd&logoColor=F5F7FB"> | `26.2.6` |
 |  | <img alt="PipeWire: 1.6.9" src="https://img.shields.io/badge/PipeWire-1.6.9-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.6.9` |
 | **Gaming** | <img alt="Steam: Proton GE 11-11" src="https://img.shields.io/badge/Steam-Proton%20GE%2011--11-B5A8F5?style=flat-square&labelColor=1D232E&logo=steam&logoColor=F5F7FB"> | `Proton GE 11-11` |
@@ -288,6 +287,24 @@ Run `just` to see all recipes. The common ones:
 | Alt+F10 · Alt+F9 | Save the last 2 minutes · the last 30 seconds (instant replay, `~/Videos/Replays`) |
 | Super+F1…F8 | OBS: switch scene |
 | Super+F9 · Super+F10 · Super+Shift+F12 | OBS: record on/off · mic mute · **stream** on/off |
+
+## Wallpapers
+
+Each wallpaper is a folder in `assets/wallpapers/`: `wide.png` (3440x1440) goes on the ultrawide,
+`4k.png` on the left monitor and the Mac, and `theme.nix` is a palette made from the image. Every
+themed app (bar, borders, terminal, launcher, LibreWolf, GTK, the lock screen) follows it.
+
+```sh
+just wallpapers                       # list them; * marks the current one
+just wallpaper pinewood               # switch wallpaper + colours and rebuild this machine
+just wallpaper                        # same, picked from a list
+just wallpaper-add forest wide.png 4k.png   # add one; makes its palette for you
+```
+
+`just wallpaper` changes two lines in `modules/flake/meta.nix` (`wallpaper` and `theme = "match"`),
+so commit afterwards and the other machine follows on its next rebuild. To keep a fixed palette
+whatever the wallpaper, set `theme` to `vainnor-slate`, `caelus` or any base16 name. If a generated
+colour feels off, edit that wallpaper's `theme.nix` (`base0D` is the accent, `base00` the background).
 
 ## Projects
 

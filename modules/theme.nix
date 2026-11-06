@@ -3,7 +3,9 @@
 # swaylock, the boot splash, LibreWolf, Vesktop, Zed, btop, bat, fish, ... plus Mango and vis,
 # which read the palette below by hand because Stylix has no target for them.
 #
-# Themes: our own in assets/themes (vainnor-slate, caelus), or any base16 name.
+# Wallpapers live in assets/wallpapers/<name>/ (wide.png for the ultrawide,
+# 4k.png for the left monitor and the Mac, theme.nix with a matching palette).
+# `just wallpaper <name>` swaps both, and everything re-themes to match.
 # The style is flat and square everywhere: no rounded corners, shadows or blur.
 {
   inputs,
@@ -14,7 +16,7 @@
 let
   inherit (config) meta;
 
-  palette = import ../assets/themes meta.theme;
+  palette = import ../assets/themes meta;
 
   # A flat background in the theme's colours, with a faint dot grid.
   dots =
@@ -71,7 +73,9 @@ in
       imports = [ inputs.stylix.nixosModules.stylix ];
       stylix = stylixFor pkgs // {
         image =
-          if builtins.isPath meta.wallpaper then
+          if palette.wallpapers != null then
+            palette.wallpapers.wide
+          else if builtins.isPath meta.wallpaper then
             meta.wallpaper
           else if meta.wallpaper == "dots" && palette.scheme != null then
             dots pkgs
@@ -94,23 +98,61 @@ in
       stylix = stylixFor pkgs;
       # Keep the Mac's own starship.toml, and skip Linux-only theming.
       home-manager.sharedModules = [
-        {
-          stylix.targets = {
-            starship.enable = false;
-            rofi.enable = false;
-            gtk.enable = false;
-            xresources.enable = false;
-            blender.enable = false;
-          };
-        }
+        (
+          { lib, ... }:
+          {
+            stylix.targets = {
+              starship.enable = false;
+              rofi.enable = false;
+              gtk.enable = false;
+              xresources.enable = false;
+              blender.enable = false;
+            };
+            # The 4K wallpaper on every Mac screen and Space.
+            home.activation.wallpaper = lib.mkIf (palette.wallpapers != null) (
+              lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                run ${pkgs.desktoppr}/bin/desktoppr all ${palette.wallpapers.uhd} || true
+              ''
+            );
+          }
+        )
       ];
     };
 
   flake.modules.homeManager.desktop =
-    { config, pkgs, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      ...
+    }:
     let
       c = config.lib.stylix.colors;
       argb = hex: "0x${hex}ff";
+      wallpaper = pkgs.writeShellApplication {
+        name = "set-wallpaper";
+        runtimeInputs = [
+          pkgs.swaybg
+          pkgs.wlr-randr
+          pkgs.jq
+        ];
+        text =
+          if palette.wallpapers == null then
+            "exec swaybg -m fill -i ${config.stylix.image}"
+          else
+            ''
+              # Wait for the outputs, then one image per screen by its shape.
+              for _ in $(seq 20); do wlr-randr --json >/dev/null 2>&1 && break; sleep 0.25; done
+              args=()
+              while read -r name w h; do
+                if [ $((w * 10 / h)) -ge 20 ]; then img=${palette.wallpapers.wide}; else img=${palette.wallpapers.uhd}; fi
+                args+=(-o "$name" -m fill -i "$img")
+              done < <(wlr-randr --json | jq -r '.[] | select(.enabled) | . as $o | ($o.modes[] | select(.current)) as $m | "\($o.name) \($m.width) \($m.height)"')
+              pkill -x swaybg || true
+              if [ ''${#args[@]} -eq 0 ]; then exec swaybg -m fill -i ${palette.wallpapers.wide}; fi
+              exec swaybg "''${args[@]}"
+            '';
+      };
       border = if palette.extra.border != null then palette.extra.border else c.base02;
     in
     {
@@ -133,9 +175,10 @@ in
         cursor_size = 24;
       };
 
-      # Wallpaper from meta.wallpaper (see flake/meta.nix).
+      # Wallpaper from meta.wallpaper (see flake/meta.nix): with a wallpaper
+      # folder, wide screens (the ultrawide) get wide.png and the rest get 4k.png.
       wayland.windowManager.mango.autostart_sh = ''
-        ${pkgs.swaybg}/bin/swaybg -m fill -i ${config.stylix.image} &
+        ${lib.getExe wallpaper} &
       '';
     };
 }

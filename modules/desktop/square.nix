@@ -3,7 +3,7 @@
 # Stylix supplies the colours; this only adds shape on top.
 { config, ... }:
 let
-  inherit (import ../../assets/themes config.meta.theme) extra;
+  inherit (import ../../assets/themes config.meta) extra;
 in
 {
   flake.modules.homeManager.desktop =

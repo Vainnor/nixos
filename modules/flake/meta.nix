@@ -24,20 +24,18 @@
     # Where the repo is cloned on the PC (nh uses this).
     flakePath = "/home/vainnor/nixos";
 
-    # One-line theme switch: "vainnor-slate" (the homelab/LibreWolf palette),
-    # "caelus" (dacctal's warm palette), both in assets/themes, or any base16 name
-    # from `ls $(nix build nixpkgs#base16-schemes --print-out-paths)/share/themes`.
-    theme = "vainnor-slate";
+    # Wallpaper and colours. `just wallpaper <name>` changes this line and rebuilds.
+    #   wallpaper: a folder in assets/wallpapers (`just wallpapers` lists them),
+    #              "dots" (flat dot grid), or a path like ../../assets/some.png
+    #   theme:     "match" = the wallpaper's own palette; or "vainnor-slate" /
+    #              "caelus" (assets/themes); or any base16 name
+    wallpaper = "dome";
+    theme = "match";
 
     # PipeWire name of your real output (BEACN Studio headphones or the HyperX
     # dongle), e.g. "alsa_output.usb-....analog-stereo". Run `just audio-devices`
     # on the PC to list them. null = virtual channels exist but System isn't default.
     audioOutput = null;
-
-    # Wallpaper: "dots" (flat theme background with a faint dot grid, own themes
-    # only), a nixos-artwork name (e.g. "nineish-dark-gray"), or a path like
-    # ../../assets/wallpaper.png. Colours still come from `theme`.
-    wallpaper = "dots";
 
     # sops-nix secrets (secrets/secrets.yaml). Flip to true once the PC's host
     # key is a recipient in .sops.yaml and the file was re-encrypted
