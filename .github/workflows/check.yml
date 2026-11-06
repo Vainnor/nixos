@@ -21,5 +21,8 @@ jobs:
         run: nix fmt -- --ci
       - name: Evaluate
         run: |
-          nix flake check --no-build --all-systems
-          nix eval --raw .#darwinConfigurations.Vainnors-MacBook-Pro.system.drvPath > /dev/null
+          # nix eval (not flake check --no-build): Stylix reads its colour scheme
+          # while evaluating, which needs that one small download.
+          nix eval --raw .#nixosConfigurations.arc.config.system.build.toplevel.drvPath
+          nix eval --raw .#nixosConfigurations.installer.config.system.build.isoImage.drvPath
+          nix eval --raw .#darwinConfigurations.Vainnors-MacBook-Pro.system.drvPath

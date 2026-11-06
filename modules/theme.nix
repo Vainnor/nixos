@@ -13,7 +13,9 @@ let
         meta.wallpaper
       else
         pkgs.nixos-artwork.wallpapers.${meta.wallpaper}.gnomeFilePath;
-    base16Scheme = "${pkgs.base16-schemes}/share/themes/${meta.theme}.yaml";
+    # Straight from the source download (same file on every system), so
+    # evaluating the Mac's config on Linux, or the PC's on the Mac, needs no build.
+    base16Scheme = "${pkgs.base16-schemes.src}/base16/${meta.theme}.yaml";
     polarity = "dark";
 
     fonts = {
