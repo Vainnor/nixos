@@ -30,7 +30,7 @@ is just the list of aspects it picks.
 | `desktop` | Mango, greetd, waybar, fuzzel (apps, emoji, calculator, files), swaync, swayosd, swaylock, Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
 | `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT, instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
 | `streaming` | OBS seeded with the Vainnor overlays: a profile, 3 themed scene collections, BEACN-style audio tracks, global hotkeys, an EasyEffects mic chain, Chatterino |
-| `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, Rust, rootless Docker |
+| `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
 | `vm` | libvirt: `win11` with the 7900 XTX passed through, `win11-lite` in a window, WinApps |
 | `privacy` | i2pd, and a LibreWolf profile that only talks through it |
 
@@ -259,6 +259,31 @@ Run `just` to see all recipes. The common ones:
 | Super+F1…F8 | OBS: switch scene |
 | Super+F9 · Super+F10 · Super+Shift+F12 | OBS: record on/off · mic mute · **stream** on/off |
 
+## Projects
+
+Nothing language-specific is installed system-wide. Each project carries its own toolchain in its
+own `flake.nix`; direnv loads it when you `cd` in and drops it when you leave. Two projects on
+Python 3.12 and 3.13 (or Node 20 and 22, JDK 17 and 21) never see each other, and deleting a
+project leaves nothing behind. Works the same on the Mac.
+
+```sh
+just new python ~/code/scraper     # python · node · java · go · php · rust · c
+cd ~/code/scraper && uv init && uv add requests && uv run main.py
+```
+
+| Template | You get | Change the version |
+|---|---|---|
+| `python` | Python, uv (venv in `.venv`), ruff, basedpyright | `python = pkgs.python312;` |
+| `node` | Node, pnpm, TypeScript, its language server, eslint/json/css servers | `node = pkgs.nodejs_20;` |
+| `java` | JDK, Gradle, Maven, jdtls | `jdk = pkgs.jdk17;` |
+| `go` | Go (never auto-downloads another), gopls, golangci-lint, delve | `go = pkgs.go_1_24;` |
+| `php` | PHP with xdebug, Composer, phpactor | `php = pkgs.php83.buildEnv { ... };` |
+| `rust` | cargo, rustc, clippy, rustfmt, rust-analyzer | pin nixpkgs, or add a rust overlay |
+| `c` | clangd, clang-format, CMake, Ninja, lldb | |
+
+Zed picks up each project's language servers from the same shell. For quick one-off scripts
+outside a project, `uv run --python 3.12 script.py` works anywhere.
+
 ## The Mac
 
 nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with signing, direnv, vis and the Stylix theme. It leaves apps, Homebrew, Zed's settings, `~/.ssh/config` and your `starship.toml` alone. Files it takes over (like `~/.config/fish/config.fish`) are kept next to it as `*.hm-backup`.
@@ -291,7 +316,7 @@ Audio tracks: 1 Audience (everything), 2 VOD (no music), 3 voices, 4 game + othe
 | `modules/gaming/` · `streaming/` · `dev/` · `virtualisation/` · `privacy/` | one folder per aspect |
 | `secrets/` | sops-encrypted; `.sops.yaml` says who can open it |
 | `assets/` | the overlay pack and these README images |
-| `templates/rust/` | `nix flake init -t ~/nixos#rust` starts a Rust project with its own dev shell |
+| `templates/` | per-language project templates for `just new` |
 
 Files and folders whose path contains `/_` (like `hosts/arc/_disko.nix`) aren't auto-loaded.
 

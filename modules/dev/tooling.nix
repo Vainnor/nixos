@@ -9,9 +9,31 @@ let
   inherit (config) meta;
 in
 {
-  flake.modules.nixos.dev = {
-    programs.nix-ld.enable = true;
-  };
+  flake.modules.nixos.dev =
+    { pkgs, ... }:
+    {
+      # Prebuilt binaries (uv's Pythons, npm/pip packages with native parts,
+      # language servers Zed downloads) find these instead of failing on NixOS.
+      programs.nix-ld = {
+        enable = true;
+        libraries = with pkgs; [
+          stdenv.cc.cc.lib
+          zlib
+          zstd
+          openssl
+          curl
+          libffi
+          libxml2
+          expat
+          glib
+          icu
+          util-linux
+          xz
+          bzip2
+          sqlite
+        ];
+      };
+    };
 
   flake.modules.homeManager.dev =
     { pkgs, lib, ... }:
@@ -53,6 +75,7 @@ in
         [
           hyperfine
           tokei
+          uv # one-off scripts anywhere: `uv run --python 3.12 script.py` (Pythons stay in ~/.local/share/uv)
         ]
         # quick experiments; real projects use the flake template. The Mac has its own rustup.
         ++ lib.optional isLinux rustup;

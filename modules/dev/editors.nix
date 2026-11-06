@@ -14,6 +14,9 @@
           "toml"
           "dockerfile"
           "docker-compose"
+          "java"
+          "php"
+          "sql"
         ];
         extraPackages = with pkgs; [
           nixd

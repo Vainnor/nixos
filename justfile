@@ -232,6 +232,20 @@ usb:
 usb-allow id:
     usbguard allow-device -p {{ id }}
 
+# ── Projects ───────────────────────────────────────────────────────────
+
+# New project with its own toolchain: `just new python ~/code/thing` (python node java go php rust c)
+new lang dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ invocation_directory() }}"
+    mkdir -p "{{ dir }}" && cd "{{ dir }}"
+    nix --extra-experimental-features 'nix-command flakes' flake init -t "{{ flake }}#{{ lang }}"
+    [ -d .git ] || git init -q
+    git add -A   # flakes only see files git knows about
+    if command -v direnv >/dev/null; then direnv allow; else echo "direnv not installed here; run: nix develop"; fi
+    echo "Ready in $PWD. The toolchain loads when you cd in."
+
 # ── Impermanence helpers ───────────────────────────────────────────────
 
 # List files on the wiped root that will be lost at reboot (find state worth persisting)
