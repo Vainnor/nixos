@@ -256,6 +256,25 @@ in
         vfio.gpuAudio
       ]
       ++ lib.optional (vfio.windowsNvme or null != null) vfio.windowsNvme;
+      reserve = vfio != null && vfio.reserveIds or null != null;
+      # Lend the reserved card to Linux until the next reboot (for games or
+      # anything heavy on the Linux side). The gaming VM can still take it
+      # after that, but then the PC reboots when Windows shuts down.
+      gpuLinux = pkgs.writeShellScriptBin "gpu-linux" ''
+        set -eu
+        if virsh -c qemu:///system domstate ${vmName} 2>/dev/null | grep -q running; then
+          echo "${vmName} is using the card; shut Windows down first." >&2
+          exit 1
+        fi
+        for d in ${vfio.gpuAudio} ${vfio.gpu}; do
+          p=/sys/bus/pci/devices/$d
+          [ "$(basename "$(readlink "$p/driver" 2>/dev/null)")" = vfio-pci ] || continue
+          echo "Handing $d to Linux"
+          sudo sh -c "echo > $p/driver_override; echo $d > /sys/bus/pci/drivers/vfio-pci/unbind; echo $d > /sys/bus/pci/drivers_probe"
+        done
+        sudo systemctl restart lactd.service
+        echo "Done. The card is Linux's until you reboot; plug a monitor into it to use it as a screen."
+      '';
       hook = pkgs.writeShellScript "gpu-passthrough-hook" ''
         set -u
         [ "$1" = "${vmName}" ] || exit 0
@@ -300,16 +319,21 @@ in
               echo 0 > /proc/sys/vm/nr_hugepages
               exit 1
             fi
-            systemctl stop greetd lactd.service 2>/dev/null
-            sleep 3
-            # Anything still holding the card (user services kept alive by an
-            # SSH login, for example) would make the handoff hang.
-            fuser -k /dev/dri/by-path/pci-${vfio.gpu}-* 2>/dev/null || true
-            sleep 1
-            for c in /sys/class/vtconsole/vtcon*/bind; do echo 0 > "$c" || true; done
-            echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind 2>/dev/null || true
             modprobe vfio-pci
-            touch "$taken"
+            # Card reserved from boot (meta.vfio.reserveIds): the desktop runs
+            # on the CPU's graphics and stays up. Otherwise take the card from
+            # Linux, which means stopping the desktop on it.
+            if [ "$(basename "$(readlink /sys/bus/pci/devices/${vfio.gpu}/driver 2>/dev/null)")" != vfio-pci ]; then
+              systemctl stop greetd lactd.service 2>/dev/null
+              sleep 3
+              # Anything still holding the card (user services kept alive by an
+              # SSH login, for example) would make the handoff hang.
+              fuser -k /dev/dri/by-path/pci-${vfio.gpu}-* 2>/dev/null || true
+              sleep 1
+              for c in /sys/class/vtconsole/vtcon*/bind; do echo 0 > "$c" || true; done
+              echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind 2>/dev/null || true
+              touch "$taken"
+            fi
             ${lib.concatMapStrings (a: "to_vfio ${a}\n            ") passthrough}
             ;;
           release/end)
@@ -343,7 +367,8 @@ in
         usbutils # lsusb
         qemu-utils # qemu-img
         virt-viewer # window for win11-lite
-      ];
+      ]
+      ++ lib.optional reserve gpuLinux;
       users.users.${meta.username}.extraGroups = [
         "libvirtd"
         "kvm"
@@ -353,8 +378,23 @@ in
       boot.kernelParams = [
         "amd_iommu=on"
         "iommu=pt"
-      ];
-      boot.extraModprobeConfig = "options kvm ignore_msrs=1 report_ignored_msrs=0";
+      ]
+      ++ lib.optional reserve "vfio-pci.ids=${vfio.reserveIds}";
+      boot.extraModprobeConfig = ''
+        options kvm ignore_msrs=1 report_ignored_msrs=0
+      ''
+      + lib.optionalString reserve ''
+        softdep amdgpu pre: vfio-pci
+      '';
+      # vfio-pci has to claim the card before amdgpu (loaded in the initrd for
+      # the boot splash) gets to it.
+      boot.initrd.kernelModules = lib.mkIf reserve (
+        lib.mkBefore [
+          "vfio_pci"
+          "vfio"
+          "vfio_iommu_type1"
+        ]
+      );
 
       environment.etc = {
         "libvirt-templates/${liteName}.xml".source = liteXml;

@@ -50,6 +50,12 @@
     vfio = {
       gpu = "0000:03:00.0"; # RX 7900 XTX
       gpuAudio = "0000:03:00.1"; # its HDMI/DP audio
+      # Keep the card away from Linux from boot (vendor:device of both
+      # functions, from `just vm-gpu`): Linux runs on the CPU's graphics, and
+      # Windows gets a card the Linux driver never touched (once Linux has
+      # used it, Windows only shows a black screen). `gpu-linux` lends it to
+      # Linux until the next reboot. null = Linux owns it, the VM takes it.
+      reserveIds = "1002:744c,1002:ab30";
       # The card's video BIOS, dumped by `just vm-vbios` (kept on the PC, not
       # in this public repo). Without it the VM shows a black screen.
       gpuRom = "/var/lib/libvirt/vbios/rx7900xtx.rom";
