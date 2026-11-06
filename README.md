@@ -342,7 +342,9 @@ First time:
 4. After that, `just mac`. Touch ID works for `sudo`.
 
 Apps come from Homebrew (`modules/hosts/mac/homebrew.nix`); nothing is uninstalled automatically.
-`just mac-upgrade` updates them. macOS settings (dark mode, Dock auto-hide, Finder list view and path
+`just mac-upgrade` updates them. To undo the whole thing, `just mac-undo` removes nix-darwin and puts
+back your settings, dotfiles and `/etc` files (`just mac-undo dry` shows what it would do first);
+`sudo darwin-rebuild --rollback` undoes just the last switch. macOS settings (dark mode, Dock auto-hide, Finder list view and path
 bar, fast key repeat, no auto-correct, screenshots in `~/Pictures/Screenshots`, firewall on) are in
 `modules/hosts/mac/settings.nix`.
 

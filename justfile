@@ -117,6 +117,57 @@ mac-adopt:
       echo "All casks are Homebrew's now. Next: just mac"
     fi
 
+# Remove nix-darwin and put the Mac back as it was (settings, dotfiles, /etc). `just mac-undo dry` only shows what it would do
+mac-undo mode="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    sys=$(readlink -f /run/current-system 2>/dev/null || true)
+    [ -n "$sys" ] && [ -e "$sys/activate" ] || { echo "nix-darwin isn't active on this Mac; nothing to undo."; exit 0; }
+    dry=false; [ "{{ mode }}" = dry ] && dry=true
+    run() { if $dry; then echo "  would: $*"; else "$@"; fi; }
+    hmf=$(nix-store -qR "$sys" | grep -m1 'home-manager-files$' || true)
+
+    if ! $dry; then
+      echo "This removes nix-darwin from this Mac:"
+      echo "  - macOS settings it set go back to Apple's defaults, firewall off"
+      echo "  - dotfiles it manages are removed, and your *.hm-backup originals put back"
+      echo "  - nix-darwin itself is uninstalled, /etc files it replaced are restored"
+      echo "Homebrew, your apps, Nix itself and the wallpaper stay as they are."
+      read -rp "Type UNDO to continue: " a; [ "$a" = UNDO ] || { echo "Nothing changed."; exit 1; }
+    fi
+
+    echo "== macOS settings"
+    grep -oE "defaults write +(-g|[^ ]+) +[^ ']+" "$sys/activate" | sort -u | while read -r _ _ dom key; do
+      case "$dom" in
+        /Library/*) run sudo defaults delete "$dom" "$key" 2>/dev/null || true ;;
+        *) run defaults delete "$dom" "$key" 2>/dev/null || true ;;
+      esac
+    done
+    run sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode off
+    run sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
+    run killall Dock Finder SystemUIServer 2>/dev/null || true
+
+    echo "== dotfiles"
+    if [ -n "$hmf" ]; then
+      (cd "$hmf" && find . \( -type l -o -type f \) | sed 's|^\./||') | while IFS= read -r f; do
+        t="$HOME/$f"
+        if [ -L "$t" ] && [[ "$(readlink "$t")" == /nix/store/* ]]; then run rm "$t"; fi
+        if [ -e "$t.hm-backup" ] && { $dry || [ ! -e "$t" ]; }; then run mv "$t.hm-backup" "$t"; fi
+      done
+    fi
+
+    echo "== nix-darwin"
+    run sudo "$sys/sw/bin/darwin-uninstaller"
+    for b in /etc/*.before-nix-darwin /etc/nix/*.before-nix-darwin; do
+      [ -e "$b" ] || continue
+      o="${b%.before-nix-darwin}"
+      run sudo rm -f "$o"
+      run sudo mv "$b" "$o"
+    done
+    run sudo launchctl kickstart -k system/org.nixos.nix-daemon
+
+    if $dry; then echo "Dry run: nothing changed."; else echo "Done. Log out and back in so every app sees the old settings."; fi
+
 # Update Homebrew and upgrade every brew and cask (normal `just mac` doesn't)
 mac-upgrade:
     brew update
