@@ -220,6 +220,16 @@ obs-reset:
 secrets-edit:
     sops secrets/secrets.yaml
 
+# Set one secret at a hidden prompt (not saved in shell history): `just secret wifi/psk`
+secret key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -rsp "{{ key }}: " v; echo
+    [ -n "$v" ] || { echo "Empty, nothing changed."; exit 1; }
+    keypath=$(python3 -c 'import json,sys; print("".join("[%s]" % json.dumps(p) for p in sys.argv[1].split("/")))' "{{ key }}")
+    printf '%s' "$v" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' | sops set --value-stdin secrets/secrets.yaml "$keypath"
+    echo "Set {{ key }}."
+
 # Print this PC's age recipient (run on the PC)
 secrets-host:
     @nix --extra-experimental-features 'nix-command flakes' run nixpkgs#ssh-to-age -- -i /persistent/etc/ssh/ssh_host_ed25519_key.pub
