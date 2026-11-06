@@ -49,6 +49,13 @@ in
         <hostdev mode="subsystem" type="pci" managed="no">
           <source>${pci addr}</source>
         </hostdev>'';
+      # The GPU with its video BIOS from a file (meta.vfio.gpuRom): without it
+      # the VM's firmware can't drive the card and the screens stay black.
+      gpuHostdev = ''
+        <hostdev mode="subsystem" type="pci" managed="no">
+          <source>${pci vfio.gpu}</source>
+          ${lib.optionalString (vfio.gpuRom or null != null) ''<rom bar="on" file="${vfio.gpuRom}"/>''}
+        </hostdev>'';
       usbdev = d: ''
         <hostdev mode="subsystem" type="usb" managed="yes">
           <source startupPolicy="optional"><vendor id="${d.vendor}"/><product id="${d.product}"/></source>
@@ -167,7 +174,7 @@ in
           <devices>
             ${commonDevices}
             ${disk}
-            ${hostdev vfio.gpu}
+            ${gpuHostdev}
             ${hostdev vfio.gpuAudio}
             <controller type="usb" model="qemu-xhci" ports="15"/>
             ${lib.concatMapStrings usbdev (vfio.usb or [ ])}

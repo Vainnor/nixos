@@ -50,6 +50,9 @@
     vfio = {
       gpu = "0000:03:00.0"; # RX 7900 XTX
       gpuAudio = "0000:03:00.1"; # its HDMI/DP audio
+      # The card's video BIOS, dumped by `just vm-vbios` (kept on the PC, not
+      # in this public repo). Without it the VM shows a black screen.
+      gpuRom = "/var/lib/libvirt/vbios/rx7900xtx.rom";
       # Handed to Windows while the VM runs, back to Linux after.
       usb = [
         {

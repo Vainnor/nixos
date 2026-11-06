@@ -382,6 +382,17 @@ vm-gpu:
       lspci -nns "$n" | grep -qiE 'vga|audio|non-volatile' && echo "group ${g:-?}  $(lspci -nns "$n")"
     done | sort -V
 
+# Save the GPU's video BIOS for the gaming VM (needed for a picture; see meta.vfio.gpuRom)
+vm-vbios gpu="0000:03:00.0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d=/sys/bus/pci/devices/{{ gpu }}
+    sudo sh -c "echo 1 > $d/rom; cat $d/rom > /tmp/vbios.rom; echo 0 > $d/rom"
+    [ "$(head -c 2 /tmp/vbios.rom | od -An -tx1 | tr -d ' ')" = 55aa ] || { echo "Not a video BIOS; is the card in use by the VM?"; exit 1; }
+    sudo install -D -m 0644 /tmp/vbios.rom /var/lib/libvirt/vbios/rx7900xtx.rom
+    rm -f /tmp/vbios.rom
+    echo "Saved /var/lib/libvirt/vbios/rx7900xtx.rom ($(stat -c %s /var/lib/libvirt/vbios/rx7900xtx.rom) bytes)"
+
 # List USB devices (vendor:product) to pass into the Windows VM
 vm-usb:
     lsusb
