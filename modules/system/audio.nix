@@ -68,15 +68,18 @@ in
   flake.modules.homeManager.desktop =
     { pkgs, lib, ... }:
     let
-      # Volume keys control the real device, so every channel follows them.
-      sink = if output != null then output else "@DEFAULT_SINK@";
-      pactl = "${pkgs.pulseaudio}/bin/pactl";
+      # Volume keys control the real device, so every channel follows them,
+      # and swayosd shows the level on screen.
+      device = lib.optionalString (output != null) " --device ${output}";
+      osd = "${pkgs.swayosd}/bin/swayosd-client";
     in
     {
+      services.swayosd.enable = true;
       wayland.windowManager.mango.settings.bind = [
-        "NONE,XF86AudioRaiseVolume,spawn,${pactl} set-sink-volume ${sink} +5%"
-        "NONE,XF86AudioLowerVolume,spawn,${pactl} set-sink-volume ${sink} -5%"
-        "NONE,XF86AudioMute,spawn,${pactl} set-sink-mute ${sink} toggle"
+        "NONE,XF86AudioRaiseVolume,spawn,${osd} --output-volume raise${device}"
+        "NONE,XF86AudioLowerVolume,spawn,${osd} --output-volume lower${device}"
+        "NONE,XF86AudioMute,spawn,${osd} --output-volume mute-toggle${device}"
+        "NONE,XF86AudioMicMute,spawn,${osd} --input-volume mute-toggle"
       ];
 
       services.easyeffects.enable = true;

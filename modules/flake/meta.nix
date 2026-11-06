@@ -55,5 +55,27 @@
     sshKeys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores vainnor@Carsons-MBP.home"
     ];
+
+    # Git commits are signed with this key through the 1Password SSH agent
+    # (the private half lives in 1Password, never on disk).
+    signingKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores";
+
+    # The Mac's hostname (`scutil --get LocalHostName`); darwin-rebuild picks
+    # darwinConfigurations.<this> automatically.
+    macHost = "Vainnors-MacBook-Pro";
+
+    # Night light (wlsunset) follows sunset here. Chicago.
+    location = {
+      latitude = 41.88;
+      longitude = -87.63;
+    };
+
+    # Instant replay records this monitor. "screen" = the first one found;
+    # `gpu-screen-recorder --list-monitors` on the PC shows names like "DP-1".
+    replayMonitor = "screen";
+
+    # restic off-site backups. Turn on once restic/* is filled in secrets.yaml
+    # (`just secrets-edit`) and secretsReady is true.
+    resticReady = false;
   };
 }

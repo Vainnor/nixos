@@ -17,6 +17,7 @@
           "network"
           "cpu"
           "memory"
+          "custom/notification"
           "custom/power"
         ];
         "custom/power" = {

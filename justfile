@@ -3,6 +3,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 host := "arc"
+mac := "Vainnors-MacBook-Pro"
 remote := "vainnor@arc.netbird.cloud"
 flake := justfile_directory()
 nix := "nix --extra-experimental-features 'nix-command flakes'"
@@ -69,11 +70,22 @@ deploy-boot: push
 push:
     git push
 
+# ── The Mac (nix-darwin) ───────────────────────────────────────────────
+
+# Build and switch the Mac (first time: see README "The Mac")
+mac:
+    sudo darwin-rebuild switch --flake {{ flake }}#{{ mac }}
+
+# Build the Mac config only, and show what would change
+mac-build:
+    {{ nix }} build {{ flake }}#darwinConfigurations.{{ mac }}.system --no-link --print-out-paths
+
 # ── Checks ─────────────────────────────────────────────────────────────
 
 # Evaluate everything without building (works on the Mac)
 check:
     {{ nix }} flake check --no-build --all-systems
+    {{ nix }} eval --raw {{ flake }}#darwinConfigurations.{{ mac }}.system.drvPath > /dev/null
 
 # Format all Nix files
 fmt:
@@ -189,6 +201,36 @@ winapps-desktop:
 # Shut the light Windows VM down cleanly
 windows-lite-stop:
     virsh -c qemu:///system shutdown win11-lite
+
+# ── Backups ────────────────────────────────────────────────────────────
+
+# List the hourly snapshots (files are under /.btrfs/@snapshots/<name>/)
+snapshots:
+    sudo btrbk -c /etc/btrbk/local.conf list snapshots
+
+# Take a snapshot right now (before something risky)
+snapshot:
+    sudo systemctl start btrbk-local
+
+# Run the restic backup to the homelab now, then show the latest snapshots
+backup:
+    sudo systemctl start restic-backups-homelab
+    sudo restic-homelab snapshots --latest 5
+
+# Restore a path from the latest restic backup into /tmp/restore (e.g. `just restore /home/vainnor/Documents`)
+restore path:
+    sudo restic-homelab restore latest --include "{{ path }}" --target /tmp/restore
+    @echo "Restored into /tmp/restore{{ path }}"
+
+# ── USB (USBGuard) ─────────────────────────────────────────────────────
+
+# List USB devices; blocked ones say "block"
+usb:
+    usbguard list-devices
+
+# Allow a blocked device for good (number from `just usb`)
+usb-allow id:
+    usbguard allow-device -p {{ id }}
 
 # ── Impermanence helpers ───────────────────────────────────────────────
 

@@ -8,7 +8,7 @@
     in
     {
       programs.zed-editor = {
-        enable = true;
+        enable = pkgs.stdenv.hostPlatform.isLinux; # the Mac keeps its own Zed.app and settings
         extensions = [
           "nix"
           "toml"

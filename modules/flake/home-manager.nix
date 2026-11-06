@@ -1,6 +1,7 @@
-# Wires home-manager into NixOS. Every NixOS aspect (base, desktop, gaming, ...)
-# automatically pulls in the home-manager module of the same name, so a feature
-# file can define both halves side by side.
+# Wires home-manager into NixOS and nix-darwin. Every NixOS aspect (base,
+# desktop, gaming, ...) automatically pulls in the home-manager module of the
+# same name, so a feature file can define both halves side by side.
+# The Mac gets the shared shell (base) and dev tools (dev), nothing desktop.
 {
   inputs,
   config,
@@ -13,6 +14,11 @@ let
   forward = aspect: {
     home-manager.users.${user}.imports = lib.optional (hm ? ${aspect}) hm.${aspect};
   };
+  common = {
+    useGlobalPkgs = true;
+    useUserPackages = true;
+    backupFileExtension = "hm-backup";
+  };
 in
 {
   flake.modules.nixos =
@@ -20,12 +26,19 @@ in
     // {
       base = {
         imports = [ inputs.home-manager.nixosModules.home-manager ];
-        home-manager = {
-          useGlobalPkgs = true;
-          useUserPackages = true;
-          backupFileExtension = "hm-backup";
+        home-manager = common // {
           users.${user}.imports = [ hm.base ];
         };
       };
     };
+
+  flake.modules.darwin.base = {
+    imports = [ inputs.home-manager.darwinModules.home-manager ];
+    home-manager = common // {
+      users.${user}.imports = [
+        hm.base
+        hm.dev
+      ];
+    };
+  };
 }

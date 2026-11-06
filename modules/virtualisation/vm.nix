@@ -244,8 +244,9 @@ in
 
       preservation.preserveAt."/persistent".directories = [ "/var/lib/libvirt" ];
       # VM disk images are rewritten in place; copy-on-write would fragment them.
+      # Their own subvolume ("v") also keeps them out of the hourly snapshots.
       systemd.tmpfiles.rules = [
-        "d /var/lib/libvirt/images 0711 root root -"
+        "v /var/lib/libvirt/images 0711 root root -"
         "h /var/lib/libvirt/images - - - - +C"
       ];
 

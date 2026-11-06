@@ -7,6 +7,8 @@
 #   /persistent  state listed in modules/system/impermanence.nix
 #   /home        your files, Steam library, browser profiles, projects
 #   /var/log     logs
+# @snapshots holds the hourly btrbk snapshots of @home and @persistent
+# (system/backups.nix), reached through the whole-filesystem view at /.btrfs.
 let
   btrfsOpts = [
     "compress=zstd"
@@ -70,6 +72,7 @@ in
                   mountpoint = "/var/log";
                   mountOptions = btrfsOpts;
                 };
+                "@snapshots" = { };
               };
             };
           };
@@ -82,5 +85,16 @@ in
     "/nix".neededForBoot = true;
     "/persistent".neededForBoot = true;
     "/var/log".neededForBoot = true;
+  };
+
+  # The top of the btrfs filesystem (all subvolumes side by side), for btrbk.
+  fileSystems."/.btrfs" = {
+    device = "/dev/mapper/cryptroot";
+    fsType = "btrfs";
+    options = [
+      "subvolid=5"
+      "noatime"
+      "compress=zstd"
+    ];
   };
 }

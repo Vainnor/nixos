@@ -20,6 +20,13 @@
 #   - WebSocket server on (random password, written into the overlays'
 #     config.js so the webcam bezel follows the "Webcam" source).
 #
+# Hotkeys (anywhere, OBS doesn't need focus), through obs-websocket:
+#   Super+F1..F8   switch to scene 1-8 of the current collection
+#                  (Starting Soon, Gameplay, no cam, 16-9, Chatting, BRB, Ending, Offline)
+#   Super+F9       start/stop recording
+#   Super+F10      mute/unmute the mic in OBS
+#   Super+Shift+F12  start/stop the STREAM (shift so it can't happen by accident)
+#
 # These files are only SEEDED: OBS owns them afterwards, so your changes in
 # OBS stick. `just obs-reset` backs them up and seeds fresh copies.
 #
@@ -150,7 +157,7 @@ in
         {
           name = "Mic";
           id = "pulse_input_capture";
-          device = "default"; # set the BEACN mic as default input in pwvucontrol
+          device = "easyeffects_source"; # the BEACN mic after the EasyEffects chain (streaming/mic.nix)
           mixers = tracks [
             1
             2
@@ -444,9 +451,43 @@ in
       jq = lib.getExe pkgs.jq;
       obsDir = "$HOME/.config/obs-studio";
       wsConfig = "${obsDir}/plugin_config/obs-websocket/config.json";
+
+      # `obs-ctl scene Gameplay`, `obs-ctl recording toggle`, ... (any obs-cmd command).
+      obsCtl = pkgs.writeShellApplication {
+        name = "obs-ctl";
+        runtimeInputs = with pkgs; [
+          obs-cmd
+          jq
+          gnused
+          libnotify
+        ];
+        text = ''
+          pw=$(jq -r .server_password "${wsConfig}" 2>/dev/null) || { notify-send -a OBS "OBS WebSocket isn't set up yet"; exit 1; }
+          export OBS_WEBSOCKET_URL="obsws://127.0.0.1:4455/$pw"
+          if [ "''${1:-}" = scene ]; then
+            # "Vainnor Purple Gameplay" -> theme "Purple"; scenes are per theme.
+            theme=$(obs-cmd scene current | sed -n 's/^Current scene: Vainnor \(Mono\|Horror\|Purple\) .*/\1/p')
+            target="Vainnor ''${theme:-${defaultTheme}} $2"
+            obs-cmd scene switch "$target" >/dev/null && notify-send -a OBS -t 1500 "Scene" "$2"
+          else
+            out=$(obs-cmd "$@") && notify-send -a OBS -t 2000 "OBS" "$out"
+          fi
+        '';
+      };
     in
     {
-      home.packages = [ pkgs.chatterino2 ]; # Twitch chat
+      home.packages = [
+        pkgs.chatterino2 # Twitch chat
+        obsCtl
+      ];
+
+      wayland.windowManager.mango.settings.bind =
+        lib.imap1 (n: s: "SUPER,F${toString n},spawn_shell,obs-ctl scene '${s.base}'") scenes
+        ++ [
+          "SUPER,F9,spawn_shell,obs-ctl recording toggle"
+          "SUPER,F10,spawn_shell,obs-ctl audio toggle 'Audio: Mic'"
+          "SUPER+SHIFT,F12,spawn_shell,obs-ctl streaming toggle"
+        ];
 
       home.file.".local/share/vainnor-overlays" = {
         source = overlays;
