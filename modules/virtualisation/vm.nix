@@ -197,7 +197,7 @@ in
               <readonly/>
             </disk>
             ${unattendCd "sde" liteName true}
-            <video><model type="virtio" heads="1" primary="yes"/></video>
+            <video><model type="virtio" heads="1" primary="yes"><resolution x="3440" y="1440"/></model></video>
             <graphics type="spice" autoport="yes">
               <listen type="none"/>
               <image compression="off"/>

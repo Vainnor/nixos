@@ -419,7 +419,7 @@ windows:
 # Open the light Windows VM in a window (half the CPU, no GPU passthrough)
 windows-lite:
     virsh -c qemu:///system domstate win11-lite | grep -q running || virsh -c qemu:///system start win11-lite
-    virt-viewer -c qemu:///system --attach --wait win11-lite &
+    virt-viewer -c qemu:///system --attach --wait --auto-resize=always win11-lite &
 
 # WinApps: pick Windows apps to add to the app launcher (win11-lite must be running)
 winapps-setup:

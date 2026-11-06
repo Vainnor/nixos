@@ -111,6 +111,9 @@
             "is_floating:1,app_id:com.saivert.pwvucontrol"
             "is_floating:1,app_id:org.rncbc.qpwgraph"
             "is_floating:1,title:^Picture-in-Picture$"
+            # The light Windows VM (`just windows-lite`): fullscreen on the
+            # ultrawide; the SPICE agent then sizes Windows to 3440x1440.
+            "is_fullscreen:1,monitor:model:VG34VQL3A,app_id:virt-viewer"
           ];
         };
       };
