@@ -21,8 +21,7 @@
   computerName,
   winapps ? false,
   # Wipe disk 0 and install there without asking. Only for a VM whose sole
-  # disk is its own image (win11-lite); USB drives passed into the gaming VM
-  # could also show up as disks, so that one still asks.
+  # disk is its own image.
   autoDisk ? false,
 }:
 let

@@ -53,6 +53,10 @@
       # The card's video BIOS, dumped by `just vm-vbios` (kept on the PC, not
       # in this public repo). Without it the VM shows a black screen.
       gpuRom = "/var/lib/libvirt/vbios/rx7900xtx.rom";
+      # A virtual screen alongside the card, for installing Windows: the card
+      # shows nothing until Windows has the AMD driver. Turn off afterwards
+      # (games would see it as a second monitor).
+      installDisplay = true;
       # Handed to Windows while the VM runs, back to Linux after.
       usb = [
         {

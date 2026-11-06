@@ -78,7 +78,9 @@ in
         name: winapps:
         import ./_unattend.nix {
           inherit pkgs winapps;
-          autoDisk = winapps; # only win11-lite, whose one disk is its own image
+          # Both VMs' only disk is their own image (the gaming VM's USB
+          # passthrough list has no storage devices).
+          autoDisk = true;
           user = meta.windowsUser;
           computerName = name;
         };
@@ -178,7 +180,17 @@ in
             ${hostdev vfio.gpuAudio}
             <controller type="usb" model="qemu-xhci" ports="15"/>
             ${lib.concatMapStrings usbdev (vfio.usb or [ ])}
-            <video><model type="none"/></video>
+            ${
+              if vfio.installDisplay or false then
+                # Temporary virtual screen (VNC, this PC only) until Windows has
+                # the AMD driver; the card shows nothing before that.
+                ''
+                  <video><model type="virtio" heads="1" primary="yes"/></video>
+                                  <graphics type="vnc" port="5909" autoport="no" listen="127.0.0.1"/>
+                                  <input type="tablet" bus="usb"/>''
+              else
+                ''<video><model type="none"/></video>''
+            }
             <memballoon model="none"/>
           </devices>
         </domain>
@@ -252,6 +264,9 @@ in
         taken=/run/${vmName}-gpu-taken
         to_vfio() {
           d=/sys/bus/pci/devices/$1
+          # Already there (VM restarted without a reboot): leave it. Unbinding
+          # from vfio-pci is exactly what crashes the kernel.
+          if [ "$(basename "$(readlink "$d/driver" 2>/dev/null)")" = vfio-pci ]; then return 0; fi
           echo vfio-pci > "$d/driver_override"
           if [ -e "$d/driver" ]; then echo "$1" > "$d/driver/unbind"; fi
           echo "$1" > /sys/bus/pci/drivers_probe
