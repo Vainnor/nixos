@@ -47,7 +47,36 @@
     #   { gpu = "0000:03:00.0"; gpuAudio = "0000:03:00.1";
     #     usb = [ { vendor = "0x046d"; product = "0x0000"; } ];
     #     windowsNvme = null; }   # or the PCI address of the Windows NVMe to boot real Windows
-    vfio = null;
+    vfio = {
+      gpu = "0000:03:00.0"; # RX 7900 XTX
+      gpuAudio = "0000:03:00.1"; # its HDMI/DP audio
+      # Handed to Windows while the VM runs, back to Linux after.
+      usb = [
+        {
+          vendor = "0x3434";
+          product = "0x0280";
+        } # Keychron K8 Pro
+        {
+          vendor = "0x258a";
+          product = "0x0033";
+        } # wired gaming mouse
+        {
+          vendor = "0x33ae";
+          product = "0x0003";
+        } # BEACN Studio
+        {
+          vendor = "0x03f0";
+          product = "0x098d";
+        } # HyperX Cloud Alpha Wireless
+        {
+          vendor = "0x046d";
+          product = "0x094d";
+        } # Logitech Brio 101
+      ];
+      # A disk image for now (`just vm-disk win11 250G`). Once Windows has its
+      # own drive, put that NVMe's PCI address here (see `just vm-gpu`).
+      windowsNvme = null;
+    };
 
     # Your Windows account in the VMs (WinApps logs in as this; use a password, not a PIN).
     windowsUser = "vainnor";

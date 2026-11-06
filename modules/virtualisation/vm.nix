@@ -223,9 +223,22 @@ in
           prepare/begin)
             systemctl stop greetd lactd.service 2>/dev/null
             sleep 3
+            # Anything still holding the card (user services kept alive by an
+            # SSH login, for example) would make the handoff hang.
+            ${pkgs.psmisc}/bin/fuser -k /dev/dri/by-path/pci-${vfio.gpu}-* 2>/dev/null || true
+            sleep 1
             for c in /sys/class/vtconsole/vtcon*/bind; do echo 0 > "$c" || true; done
             echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind 2>/dev/null || true
-            echo 8192 > /proc/sys/vm/nr_hugepages   # 16 GiB in 2 MiB pages
+            # 16 GiB in 2 MiB pages; compact first so fragmented RAM doesn't make it fall short.
+            sync; echo 3 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory
+            echo 8192 > /proc/sys/vm/nr_hugepages
+            if [ "$(cat /proc/sys/vm/nr_hugepages)" -lt 8192 ]; then
+              echo "Only $(cat /proc/sys/vm/nr_hugepages) of 8192 hugepages; close some apps and try again." >&2
+              echo 0 > /proc/sys/vm/nr_hugepages
+              for c in /sys/class/vtconsole/vtcon*/bind; do echo 1 > "$c" || true; done
+              systemctl start lactd.service greetd
+              exit 1
+            fi
             ;;
           release/end)
             echo 0 > /proc/sys/vm/nr_hugepages
