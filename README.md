@@ -235,7 +235,7 @@ gives up on it after 5 seconds and carries on. `just cache-push` pushes the runn
 `win11-lite` is for small Windows-only apps. It runs in a window on your Linux desktop and uses 4 cores / 8 threads and 8 GB of RAM. Graphics are a basic virtual display, so it handles office tools and 2D apps but not games.
 1. Run `just vm-setup` (once), `just vm-virtio` and `just vm-disk win11-lite 80G`.
 2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`, then run `just windows-lite`.
-3. Pick the 80 GB disk when Setup asks where to install. Everything else is automatic: Windows 11 Pro, a local account named `meta.windowsUser` (no Microsoft account), and privacy settings turned down.
+3. Setup runs on its own (the full `win11` VM asks which disk to use; `win11-lite` uses its own): Windows 11 Pro, a local account named `meta.windowsUser` (no Microsoft account), and privacy settings turned down.
 4. Log in with the password `changeme`. A first-login script then:
    - turns telemetry down to the minimum Pro allows, and switches off ads, suggestions, Copilot, Recall, web search in Start, activity history and location;
    - removes OneDrive and the preinstalled store apps;

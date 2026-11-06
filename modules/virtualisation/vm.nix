@@ -69,6 +69,7 @@ in
         name: winapps:
         import ./_unattend.nix {
           inherit pkgs winapps;
+          autoDisk = winapps; # only win11-lite, whose one disk is its own image
           user = meta.windowsUser;
           computerName = name;
         };

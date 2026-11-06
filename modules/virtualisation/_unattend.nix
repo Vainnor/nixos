@@ -20,6 +20,10 @@
   user,
   computerName,
   winapps ? false,
+  # Wipe disk 0 and install there without asking. Only for a VM whose sole
+  # disk is its own image (win11-lite); USB drives passed into the gaming VM
+  # could also show up as disks, so that one still asks.
+  autoDisk ? false,
 }:
 let
   # Windows' generic Pro *install* key: picks the edition, doesn't activate it.
@@ -50,6 +54,29 @@ let
     ) 6
   );
 
+  diskConfig = ''
+    <DiskConfiguration>
+      <Disk wcm:action="add">
+        <DiskID>0</DiskID>
+        <WillWipeDisk>true</WillWipeDisk>
+        <CreatePartitions>
+          <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>300</Size></CreatePartition>
+          <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
+          <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+        </CreatePartitions>
+        <ModifyPartitions>
+          <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
+          <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>2</PartitionID></ModifyPartition>
+          <ModifyPartition wcm:action="add"><Order>3</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
+        </ModifyPartitions>
+      </Disk>
+    </DiskConfiguration>
+    <ImageInstall>
+      <OSImage>
+        <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+      </OSImage>
+    </ImageInstall>'';
+
   xml = ''
     <?xml version="1.0" encoding="utf-8"?>
     <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
@@ -65,6 +92,7 @@ let
             <ProductKey><Key>${proKey}</Key><WillShowUI>OnError</WillShowUI></ProductKey>
             <AcceptEula>true</AcceptEula>
           </UserData>
+            ${if autoDisk then diskConfig else ""}
         </component>
       </settings>
       <settings pass="specialize">
