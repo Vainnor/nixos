@@ -16,7 +16,8 @@ NixOS for **arc** (Ryzen 7 9800X3D · RX 7900 XTX · 32 GB), dual-booting with W
 drive, plus the MacBook through nix-darwin. **One flake describes both, and one command installs the PC.**
 The layout is [dendritic](https://vimjoyer.com/nix/dendritic/): every file under `modules/` is a
 flake-parts module for one feature, holding its NixOS and home-manager halves side by side. A machine
-is just the list of aspects it picks.
+is just the list of aspects it picks. Day to day, `vx` (`tools/vx`, Rust) is the one command for
+everything, on both machines; `vx` on its own lists it all (see [Day to day](#day-to-day)).
 
 <p align="center">
   <img src="assets/readme/architecture.svg" alt="Flake inputs feed the modules directory, where seven aspects (base, desktop, gaming, streaming, dev, vm, privacy) and meta.nix live. arc, the Mac and the installer pick from them. arc's drive is LUKS2 with btrfs subvolumes, and / is a tmpfs wiped every boot." width="100%">
@@ -42,7 +43,7 @@ come from the wallpaper (see [Wallpapers](#wallpapers)).
 
 ## Built with
 
-Versions are the ones pinned in `flake.lock` today; `just update` moves them.
+Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 
 | Layer | Tool | Version |
 |---|---|---|
@@ -83,7 +84,7 @@ Versions are the ones pinned in `flake.lock` today; `just update` moves them.
 1. **The installer only ever erases one disk.** It finds the Crucial P310 by model, refuses anything with
    Windows or NTFS on it, and waits for you to type `YES`. The Windows drives are never named anywhere.
 2. **`/` is wiped on every boot.** Anything not declared here or listed in
-   `modules/system/impermanence.nix` is gone after a reboot. `just ephemeral` shows what would be lost.
+   `modules/system/impermanence.nix` is gone after a reboot. `vx persist-check` shows what would be lost.
 3. **The repo is public; secrets are not.** They're sops-encrypted in `secrets/`, and CI fails on anything
    that looks like a leaked credential. The Mac's age key is the one thing this repo can't rebuild.
 
@@ -105,7 +106,11 @@ The installer:
 
 When it finishes, reboot. Choose the NixOS drive with F11 if Windows starts instead. Log in, then run `sudo netbird up`, and `gh auth login` so `git push` works (the repo is cloned over HTTPS; choose HTTPS and "Login with a web browser").
 
-**Optional custom ISO**: the installer is preloaded, so you just run `sudo install-nixos`.
+If you'd rather install from a clone of the repo, clone it to `~/nixos` and run
+`sudo nix --extra-experimental-features 'nix-command flakes' run ~/nixos#install`; it's the same installer.
+
+**Optional custom ISO**: the installer is preloaded, so you just run `sudo install-nixos`. It also
+has `vx`, so from a clone in `~/nixos`, `vx install` does the same. Build it with `vx iso`, or
 `nix build .#nixosConfigurations.installer.config.system.build.isoImage` (on x86_64 Linux; WSL works).
 
 ## Impermanence
@@ -116,8 +121,10 @@ When it finishes, reboot. Choose the NixOS drive with F11 if Windows starts inst
 - `/var/log`,
 - what `modules/system/impermanence.nix` lists under `/persistent`.
 
-If a service forgets its state after a reboot, add its directory to that list.
-Because `/etc/shadow` is wiped as well, your password is stored as a hash in `/persistent/passwords/<user>`. To change it:
+If a service forgets its state after a reboot, add its directory to that list. `vx persist-check` finds
+files on `/` that would be lost and says how to keep each one.
+Because `/etc/shadow` is wiped as well, your password is stored as a hash in `/persistent/passwords/<user>`. To change it, run
+`vx password` (it applies at the next login), or by hand:
 
 ```
 mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
@@ -130,8 +137,8 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 
 1. On first boot, your own Secure Boot keys are created in `/var/lib/sbctl` (kept on `/persistent`).
 2. Reboot into the BIOS. Go to *Security > Secure Boot*, set the mode to **Custom**, then **delete all keys** (this is Setup Mode). Save and reboot. systemd-boot enrolls your keys plus Microsoft's; Windows and the GPU's option ROM need Microsoft's.
-3. Back in the BIOS, turn Secure Boot **on**. Then run `just secureboot-status`. It should show *Secure Boot: enabled*.
-4. Run `just tpm-enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
+3. Back in the BIOS, turn Secure Boot **on**. Then run `vx secureboot`. It should show *Secure Boot: enabled*.
+4. Run `vx tpm enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
 
 </details>
 
@@ -139,9 +146,9 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 <summary><b>Secrets (sops)</b></summary>
 
 `secrets/secrets.yaml` is encrypted (it holds the Twitch stream key and the StreamElements ID and token). Only the recipients in `.sops.yaml` can open it.
-1. The installer prints the PC's age key, and also saves it in `~/nixos/HOST_AGE_KEY.txt`. `just secrets-host` shows it again.
-2. On the Mac, run `just secrets-add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
-3. Run `just secrets-edit` to fill in real values, then `just commit "..."` and `just deploy`.
+1. The installer prints the PC's age key, and also saves it in `~/nixos/HOST_AGE_KEY.txt`. `vx secrets host` shows it again.
+2. On the Mac, run `vx secrets add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
+3. Run `vx secrets edit` to fill in real values, then `vx commit "..."` and `vx deploy`.
 
 What's in there: the Twitch key and StreamElements token, the WinApps password, your Wi-Fi (`wifi/ssid`, `wifi/psk`), a NetBird setup key (`netbird/setup_key`, so the PC joins the mesh by itself) and the restic target (see Backups).
 
@@ -160,15 +167,15 @@ Sign in once, then in *Settings > Developer* turn on **Use the SSH agent** and *
 Open **CoolerControl** from the launcher. Pick a fan, make a curve against a temperature (CPU, liquid, GPU), and apply it. The curves keep running after you close the app. For a quick switch, make a "quiet" and a "gaming" mode.
 - Leave the graphics card's fans to **LACT**. Giving them a curve in CoolerControl too makes the two programs fight over the fan.
 - If a case fan shows a speed but won't change, set its control mode to PWM in the BIOS (Hardware Monitor) first.
-- `just fans-save` copies your curves into the repo; commit them. A reinstall then starts with the same curves.
+- `vx fans save` copies your curves into the repo; commit them. A reinstall then starts with the same curves.
 
 </details>
 
 <details>
 <summary><b>Backups</b></summary>
 
-- **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `just snapshots` lists them; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
-- **restic to the homelab**: put the repository URL, a password and (for S3/MinIO) keys in `restic/*` with `just secrets-edit`, then set `meta.resticReady = true` and deploy. It runs nightly at 03:30 (or at the next boot if the PC was off). `just backup` runs it now, `just restore <path>` gets files back.
+- **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `vx snapshots` lists them, `vx snapshot` takes one now (before something risky), and `vx restore <path>` brings a file back from one; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
+- **restic to the homelab**: put the repository URL, a password and (for S3/MinIO) keys in `restic/*` with `vx secrets edit`, then set `meta.resticReady = true` and deploy. It runs nightly at 03:30 (or at the next boot if the PC was off). `vx backup` runs it now, and `vx restore --restic <path>` gets files back from it into `/tmp/restore` (plain `vx restore <path>` picks a version from the local snapshots).
 
 </details>
 
@@ -203,7 +210,7 @@ Open `https://localhost:47990` on the PC, create the admin login, then pair Moon
 <details>
 <summary><b>USB devices</b></summary>
 
-Devices that are plugged in at boot always work, and everything connected on the first boot is remembered. A new device plugged in later is blocked and a notification says so: `just usb` shows it, `just usb-allow <n>` allows it for good.
+Devices that are plugged in at boot always work, and everything connected on the first boot is remembered. A new device plugged in later is blocked and a notification says so: `vx usb` shows it, `vx usb allow <n>` allows it for good.
 
 </details>
 
@@ -213,16 +220,16 @@ Devices that are plugged in at boot always work, and everything connected on the
 Once the homelab runs Attic, put its endpoint, cache name and public key in `meta.binaryCache` and the
 push token in the secrets (`attic/token`), then deploy. Both machines download from it first, and the PC
 pushes everything it builds, so the Mac and any reinstall reuse those builds. If the homelab is down, Nix
-gives up on it after 5 seconds and carries on. `just cache-push` pushes the running system by hand.
+gives up on it after 5 seconds and carries on. `vx cache-push` pushes the running system by hand.
 
 </details>
 
 <details>
 <summary><b>Windows VM with the GPU</b></summary>
 
-1. Run `just vm-gpu` and `just vm-usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `just switch`.
-2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`. Then run `just vm-virtio`, `just vm-disk 250G` and `just vm-setup`.
-3. `just windows` starts the VM. Your Linux session closes, and Windows takes over the monitors at near-native speed. When you shut Windows down, you're back at the Linux login.
+1. Run `vx vm gpu` and `vx vm usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `vx switch`.
+2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`. Then run `vx vm virtio`, `vx vm disk win11 250G` and `vx vm setup`.
+3. `vx windows` starts the VM. Your Linux session closes, and Windows takes over the monitors at near-native speed. When you shut Windows down, you're back at the Linux login.
    The first time, install Windows and load the virtio drivers from the second CD drive.
    To boot your existing Windows install instead, set `meta.vfio.windowsNvme` to its NVMe's PCI address. Windows may then ask you to re-activate.
 
@@ -232,8 +239,8 @@ gives up on it after 5 seconds and carries on. `just cache-push` pushes the runn
 <summary><b>Light Windows VM (no GPU passthrough)</b></summary>
 
 `win11-lite` is for small Windows-only apps. It runs in a window on your Linux desktop and uses 4 cores / 8 threads and 8 GB of RAM. Graphics are a basic virtual display, so it handles office tools and 2D apps but not games.
-1. Run `just vm-setup` (once), `just vm-virtio` and `just vm-disk win11-lite 80G`.
-2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`, then run `just windows-lite`.
+1. Run `vx vm setup` (once), `vx vm virtio` and `vx vm disk win11-lite 80G`.
+2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`, then run `vx windows lite`.
 3. Setup runs on its own: Windows 11 Pro, a local account named `meta.windowsUser` (no Microsoft account), and privacy settings turned down.
 4. Log in with the password `changeme`. A first-login script then:
    - turns telemetry down to the minimum Pro allows, and switches off ads, suggestions, Copilot, Recall, web search in Start, activity history and location;
@@ -243,9 +250,9 @@ gives up on it after 5 seconds and carries on. `just cache-push` pushes the runn
    - in `win11-lite`, adds software OpenGL 4.6 (Mesa llvmpipe) for CRC. There's no GPU in this VM, so apps that need OpenGL 3.2+ would otherwise refuse to start. The DLLs sit next to `CRC.exe` and are put back at every login if a CRC update removes them. For another app, copy `C:\Tools\mesa\x64\*.dll` next to its `.exe`.
 5. The VM restarts after a minute. At the next login, Windows asks you to choose your own password.
 
-The answer file is in `modules/virtualisation/_unattend.nix`. The full `win11` VM gets the same treatment when it installs onto a new disk image (not when it boots your real Windows drive). If you've already defined the VMs, run `just vm-setup` again to pick up changes.
+The answer file is in `modules/virtualisation/_unattend.nix`. The full `win11` VM gets the same treatment when it installs onto a new disk image (not when it boots your real Windows drive). If you've already defined the VMs, run `vx vm setup` again to pick up changes.
 
-`just windows-lite-stop` shuts it down. The two Windows VMs have separate disks, so they don't affect each other.
+`vx windows lite stop` shuts it down. The two Windows VMs have separate disks, so they don't affect each other.
 
 </details>
 
@@ -255,8 +262,8 @@ The answer file is in `modules/virtualisation/_unattend.nix`. The full `win11` V
 WinApps runs apps from `win11-lite` as separate windows on your desktop (over RDP RemoteApp). They appear in the launcher (Super+Space) like normal apps.
 1. `win11-lite` installs as Windows 11 **Pro** (Home has no RDP), with the account named in `meta.windowsUser`. Log in with a **password**, not a PIN.
 2. The first-login script already ran the WINAPPS setup. To redo it, open the **WINAPPS** CD in the VM, right-click `install.bat`, choose *Run as administrator*, and reboot.
-3. Set the password: run `just secrets-edit` and fill in `winapps.rdp_password`. If secrets aren't set up yet, a password box asks for it instead.
-4. With the VM running, run `just winapps-setup` and pick apps. Later, `just winapps-add` adds apps you install, and `just winapps-desktop` opens the whole Windows desktop.
+3. Set the password: run `vx secrets edit` and fill in `winapps.rdp_password`. If secrets aren't set up yet, a password box asks for it instead.
+4. With the VM running, run `vx winapps setup` and pick apps. Later, `vx winapps add` adds apps you install, and `vx winapps desktop` opens the whole Windows desktop.
 
 Your Linux home folder shows up in Windows as `\\tsclient\home`. The VM pauses itself after 5 idle minutes.
 
@@ -266,34 +273,43 @@ Games with kernel anti-cheat refuse to run in VMs. For those, boot Windows nativ
 
 ## Day to day
 
-Run `just` to see all recipes. The common ones:
+Everything goes through `vx` (`tools/vx`, Rust), on the PC and the Mac alike. Run `vx` to see every
+command, `vx <command> --help` for one; tab completion works in fish. Before vx is installed (a
+fresh Mac, say), `nix run .#vx -- <command>` runs it from the repo. It works on the repo at `~/nixos`
+on the PC and `~/Programing/nixos` on the Mac; `--repo` (or `VX_REPO`) points it anywhere else. The common ones:
 
 | Command | What it does |
 |---|---|
-| `just switch` | Rebuild and switch (on the PC) |
-| `just test` / `just boot` | Activate until reboot / activate on next boot only |
-| `just upgrade` | Update all flake inputs, then switch |
-| `just update nixpkgs` | Update a single input |
-| `just rollback` | Go back to the previous generation |
-| `just clean` | Delete old generations (keeps 10) |
-| `just deploy` | From the Mac: push, then pull and switch on the PC over NetBird SSH |
-| `just check` / `just fmt` | Evaluate everything without building (works on the Mac) / format |
-| `just commit "msg"` | Format, check, and commit |
-| `just ephemeral` | List files on `/` that would be lost at reboot |
-| `just password` | Change your login password |
-| `just iso` | Build the custom installer ISO |
-| `just secrets-edit` | Edit the encrypted secrets (on the Mac) |
-| `just secureboot-status` / `just tpm-enroll` | Check Secure Boot / enroll the TPM unlock |
-| `just windows` | Start the Windows VM with the GPU passed through |
-| `just audio-devices` | List audio outputs (set the real one as `meta.audioOutput`) |
-| `just obs-reset` | Back up OBS settings and re-seed the Vainnor profile/scenes |
-| `just fans` / `just fans-save` | Temperatures and fan speeds / save the fan curves into the repo |
-| `just snapshots` / `just snapshot` | List the hourly snapshots / take one now |
-| `just backup` / `just restore <path>` | Run the restic backup now / restore a path to `/tmp/restore` |
-| `just usb` / `just usb-allow <n>` | List USB devices / allow a blocked one |
-| `just mac` / `just mac-build` | Switch / build the Mac (nix-darwin) |
-| `just diff` / `just tree` | What changed in the last rebuild / what takes space in the system |
-| `just new <lang> <dir>` | New project with its own toolchain (see Projects) |
+| `vx status` | One screen: generation, repo, inputs, failed units, disks, backups, network |
+| `vx doctor` | Deeper checks (secrets, SSH agent, signing, caches, the flake), each with its fix |
+| `vx switch` | Rebuild and switch (darwin-rebuild on the Mac) |
+| `vx test` / `vx boot` | Activate until reboot / activate on next boot only |
+| `vx update` | Update all flake inputs (or `vx update nixpkgs`), show what changes, offer to switch |
+| `vx upgrade` | Update all flake inputs, then switch |
+| `vx rollback` | Go back to the previous generation |
+| `vx clean` | Delete old generations (keeps the last 10 and 14 days) |
+| `vx sync` | Format, check, commit, push, switch here, then offer the other machine |
+| `vx deploy` | From the Mac: push, then pull and switch on the PC over NetBird SSH |
+| `vx @arc …` / `vx @mac …` | Run any vx command on the other machine over SSH (`vx @arc status`) |
+| `vx check` / `vx fmt` | Evaluate everything without building (works on the Mac) / format |
+| `vx commit "msg"` | Format, check, and commit |
+| `vx add <pkg>` / `vx remove <pkg>` | Install a package (into `modules/apps/extra.nix`; `--host arc`/`mac`) / take it out again |
+| `vx try <pkg>` / `vx search <words>` | Run a package once without installing it / search the pinned nixpkgs |
+| `vx persist-check` | Find files on `/` that would be lost at reboot, and how to keep them |
+| `vx password` | Change your login password |
+| `vx iso` | Build the custom installer ISO |
+| `vx secrets edit` | Edit the encrypted secrets (on the Mac) |
+| `vx secureboot` / `vx tpm enroll` | Check Secure Boot / enroll the TPM unlock |
+| `vx windows` | Start the Windows VM with the GPU passed through |
+| `vx audio devices` | List audio outputs (set the real one as `meta.audioOutput`) |
+| `vx obs reset` | Back up OBS settings and re-seed the Vainnor profile/scenes |
+| `vx fans` / `vx fans save` | Temperatures and fan speeds / save the fan curves into the repo |
+| `vx snapshots` / `vx snapshot` | List the hourly snapshots / take one now |
+| `vx backup` / `vx restore <path>` | Run the restic backup now / bring a path back from a snapshot (`--restic`: from the homelab) |
+| `vx usb` / `vx usb allow <n>` | List USB devices / allow a blocked one |
+| `vx mac build` / `vx mac upgrade` | Build the Mac and show what would change / upgrade the Homebrew apps |
+| `vx diff` / `vx tree` | What the working tree would change vs the running system / what takes space in the system |
+| `vx new <lang> <dir>` | New project with its own toolchain (see Projects) |
 
 ### Keys worth knowing
 
@@ -317,13 +333,15 @@ Each wallpaper is a folder in `assets/wallpapers/`: `wide.png` (3440x1440) goes 
 themed app (the shell, borders, terminal, LibreWolf, GTK, Qt, the lock screen) follows it.
 
 ```sh
-just wallpapers                       # list them; * marks the current one
-just wallpaper pinewood               # switch wallpaper + colours and rebuild this machine
-just wallpaper                        # same, picked from a list
-just wallpaper-add forest wide.png 4k.png   # add one; makes its palette for you
+vx wallpapers                       # list them; * marks the current one
+vx wallpaper pinewood               # switch wallpaper + colours and rebuild this machine
+vx wallpaper                        # same, picked from a list
+vx wallpaper add forest wide.png 4k.png   # add one; makes its palette for you
+vx wallpaper try forest             # on the Mac: preview its colours without changing anything
+vx theme check forest               # check the palette's contrast
 ```
 
-`just wallpaper` changes two lines in `modules/flake/meta.nix` (`wallpaper` and `theme = "match"`),
+`vx wallpaper` changes two lines in `modules/flake/meta.nix` (`wallpaper` and `theme = "match"`),
 so commit afterwards and the other machine follows on its next rebuild. To keep a fixed palette
 whatever the wallpaper, set `theme` to `vainnor-slate`, `caelus` or any base16 name. If a generated
 colour feels off, edit that wallpaper's `theme.nix` (`base0D` is the accent, `base00` the background).
@@ -336,7 +354,7 @@ Python 3.12 and 3.13 (or Node 20 and 22, JDK 17 and 21) never see each other, an
 project leaves nothing behind. Works the same on the Mac.
 
 ```sh
-just new python ~/code/scraper     # python · node · java · go · php · rust · c
+vx new python ~/code/scraper     # python · node · java · go · php · rust · c
 cd ~/code/scraper && uv init && uv add requests && uv run main.py
 ```
 
@@ -360,12 +378,12 @@ nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with si
 First time:
 1. `sudo mv /etc/nix/nix.conf /etc/nix/nix.conf.before-nix-darwin` (nix-darwin manages it from now on). If it also complains about `/etc/bashrc` or `/etc/zshrc`, move those the same way.
 2. `sudo nix --extra-experimental-features 'nix-command flakes' run nix-darwin -- switch --flake ~/Programing/nixos`
-3. `just mac-adopt` hands the apps you installed by hand to Homebrew (one time; otherwise `brew bundle` stops at "already an App at ...").
-4. After that, `just mac`. Touch ID works for `sudo`.
+3. `vx mac adopt` hands the apps you installed by hand to Homebrew (one time; otherwise `brew bundle` stops at "already an App at ...").
+4. After that, `vx switch`. Touch ID works for `sudo`.
 
 Apps come from Homebrew (`modules/hosts/mac/homebrew.nix`); nothing is uninstalled automatically.
-`just mac-upgrade` updates them. To undo the whole thing, `just mac-undo` removes nix-darwin and puts
-back your settings, dotfiles and `/etc` files (`just mac-undo dry` shows what it would do first);
+`vx mac upgrade` updates them. To undo the whole thing, `vx mac undo` removes nix-darwin and puts
+back your settings, dotfiles and `/etc` files (`vx mac undo --dry` shows what it would do first);
 `sudo darwin-rebuild --rollback` undoes just the last switch. macOS settings (dark mode, Dock auto-hide, Finder list view and path
 bar, fast key repeat, no auto-correct, screenshots in `~/Pictures/Screenshots`, firewall on) are in
 `modules/hosts/mac/settings.nix`.
@@ -374,7 +392,7 @@ bar, fast key repeat, no auto-correct, screenshots in `~/Pictures/Screenshots`, 
 
 On first launch OBS opens the **Vainnor** profile and the **Vainnor Purple** scene collection.
 Mono and Horror are under *Scene Collection*. You still have to:
-1. Run `just audio-devices` and put your real output in `meta.audioOutput`, then `just switch`. This makes **System** the default output, so all app audio reaches OBS.
+1. Run `vx audio devices` and put your real output in `meta.audioOutput`, then `vx switch`. This makes **System** the default output, so all app audio reaches OBS.
 2. In pwvucontrol, move each app to its channel: games to **Game**, Vesktop/TeamSpeak to **Chat**, Cider to **Music**, LibreWolf to **Browser**. Set the BEACN mic as the default input. EasyEffects cleans it up (noise removal, gate, compressor, limiter) and OBS records the cleaned **Easy Effects Source**.
 3. In OBS: add your Twitch stream key or account (*Settings > Stream*), and pick the Brio in the **Webcam** source if it isn't already selected.
 4. In Steam, set each game's launch options to `obs-gamecapture %command%` so **Game Capture** sees it.
@@ -393,12 +411,12 @@ Audio tracks: 1 Audience (everything), 2 VOD (no music), 3 voices, 4 game + othe
 | `modules/gaming/` · `streaming/` · `dev/` · `virtualisation/` · `privacy/` | one folder per aspect |
 | `secrets/` | sops-encrypted; `.sops.yaml` says who can open it |
 | `assets/` | the overlay pack and these README images |
-| `templates/` | per-language project templates for `just new` |
+| `templates/` | per-language project templates for `vx new` |
 
 Files and folders whose path contains `/_` (like `hosts/arc/_disko.nix`) aren't auto-loaded.
 
 ## If the drive dies
 
 Snapshots live on the same disk, so they won't help. Install again (`nix run github:vainnor/nixos`),
-add the new host key with `just secrets-add-host`, then `just restore /home/vainnor` (and anything from
+add the new host key with `vx secrets add-host`, then `vx restore --restic /home/vainnor` (and anything from
 `/persistent` you need) and copy it back from `/tmp/restore`. Without the Mac's age key, nothing in `secrets/` can be decrypted.

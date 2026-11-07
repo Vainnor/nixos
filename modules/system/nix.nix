@@ -47,8 +47,7 @@ in
 
         environment.systemPackages = with pkgs; [
           nix-output-monitor
-          just # recipes in the repo's justfile
-          mkpasswd # `just password`
+          mkpasswd # `vx password`
         ];
       };
     };

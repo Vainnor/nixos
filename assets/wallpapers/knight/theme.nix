@@ -25,7 +25,7 @@
     accent2 = "7F8794";
   };
   # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
-  # `just theme-check knight` checks the result.
+  # `vx theme check knight` checks the result.
   overrides = {
     # Grey-on-black engraving; B9C2CF was grey. Steel blue along the palette's
     # cool tint (hue 257), deeper than noir's so the two differ.

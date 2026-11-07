@@ -117,8 +117,8 @@ in
         wget
         jq
         fastfetch
-        nvd # what changed between two system generations (`just diff`)
-        nix-tree # what's taking space in a closure (`just tree`)
+        nvd # what changed between two system generations (`vx diff`)
+        nix-tree # what's taking space in a closure (`vx tree`)
       ];
     };
 }

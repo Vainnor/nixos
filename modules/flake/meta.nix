@@ -24,8 +24,8 @@
     # Where the repo is cloned on the PC (nh uses this).
     flakePath = "/home/vainnor/nixos";
 
-    # Wallpaper and colours. `just wallpaper <name>` changes this line and rebuilds.
-    #   wallpaper: a folder in assets/wallpapers (`just wallpapers` lists them),
+    # Wallpaper and colours. `vx wallpaper <name>` changes this line and rebuilds.
+    #   wallpaper: a folder in assets/wallpapers (`vx wallpapers` lists them),
     #              "dots" (flat dot grid), or a path like ../../assets/some.png
     #   theme:     "match" = the wallpaper's own palette; or "vainnor-slate" /
     #              "caelus" (assets/themes); or any base16 name
@@ -33,21 +33,21 @@
     theme = "match";
     # Colours laid over the active theme last, for quick experiments, e.g.
     # { base0D = "E0A040"; border = "3A3F3C"; } (see assets/themes/default.nix).
-    # Lasting fixes go in the theme file's own `overrides`. `just theme-check` checks them.
+    # Lasting fixes go in the theme file's own `overrides`. `vx theme check` checks them.
     themeOverrides = { };
 
     # PipeWire name of your real output (BEACN Studio headphones or the HyperX
-    # dongle), e.g. "alsa_output.usb-....analog-stereo". Run `just audio-devices`
+    # dongle), e.g. "alsa_output.usb-....analog-stereo". Run `vx audio devices`
     # on the PC to list them. null = virtual channels exist but System isn't default.
     audioOutput = null;
 
     # sops-nix secrets (secrets/secrets.yaml). Flip to true once the PC's host
     # key is a recipient in .sops.yaml and the file was re-encrypted
-    # (`just secrets-host` on the PC, then `just secrets-add-host <key>` on the Mac).
+    # (`vx secrets host` on the PC, then `vx secrets add-host <key>` on the Mac).
     secretsReady = false;
 
     # GPU passthrough to the Windows VM. null = libvirt/virt-manager only.
-    # Fill in from `just vm-gpu` / `just vm-usb` on the PC, e.g.
+    # Fill in from `vx vm gpu` / `vx vm usb` on the PC, e.g.
     #   { gpu = "0000:03:00.0"; gpuAudio = "0000:03:00.1";
     #     usb = [ { vendor = "0x046d"; product = "0x0000"; } ];
     #     windowsNvme = null; }   # or the PCI address of the Windows NVMe to boot real Windows
@@ -60,8 +60,8 @@
       # code 43 and a black screen). `gpu-linux` lends it to Linux until the
       # next reboot. false = Linux owns it and the VM takes it when it starts.
       reserveGpu = false; # true: no picture from the card in Windows on this PC (tested Nov 2026)
-      gpuAudioId = "1002:ab30"; # vendor:device of gpuAudio, from `just vm-gpu`
-      # The card's video BIOS, dumped by `just vm-vbios` (kept on the PC, not
+      gpuAudioId = "1002:ab30"; # vendor:device of gpuAudio, from `vx vm gpu`
+      # The card's video BIOS, dumped by `vx vm vbios` (kept on the PC, not
       # in this public repo). Without it the VM shows a black screen.
       gpuRom = "/var/lib/libvirt/vbios/rx7900xtx.rom";
       # A virtual screen alongside the card, for installing Windows: the card
@@ -91,8 +91,8 @@
           product = "0x094d";
         } # Logitech Brio 101
       ];
-      # A disk image for now (`just vm-disk win11 250G`). Once Windows has its
-      # own drive, put that NVMe's PCI address here (see `just vm-gpu`).
+      # A disk image for now (`vx vm disk win11 250G`). Once Windows has its
+      # own drive, put that NVMe's PCI address here (see `vx vm gpu`).
       windowsNvme = null;
     };
 
@@ -126,7 +126,7 @@
     replayMonitor = "screen";
 
     # restic off-site backups. Turn on once restic/* is filled in secrets.yaml
-    # (`just secrets-edit`) and secretsReady is true.
+    # (`vx secrets edit`) and secretsReady is true.
     resticReady = false;
 
     # Homelab binary cache (Attic). null = off. Fill in from the homelab, e.g.

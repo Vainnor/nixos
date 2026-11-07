@@ -7,7 +7,7 @@ Prints a theme.nix for assets/wallpapers/<name>/. Without overrides it picks:
   accent      the image's most vivid colour (silver for black-and-white images)
   the rest    greys tinted toward the background, and the usual red/orange/
               yellow/green/cyan/blue/purple at a saturation that suits the image
-Run by `just wallpaper-add`; edit the result by hand if a colour feels off.
+Run by `vx wallpaper add`; edit the result by hand if a colour feels off.
 """
 
 import argparse

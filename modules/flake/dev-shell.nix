@@ -10,7 +10,11 @@
           nixfmt
           nix-output-monitor
           git
-          just
+          cargo
+          rustc
+          clippy
+          rustfmt
+          rust-analyzer
           sops
           age
           ssh-to-age

@@ -25,7 +25,7 @@
     accent2 = "8FB4D0";
   };
   # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
-  # `just theme-check ascii` checks the result.
+  # `vx theme check ascii` checks the result.
   overrides = {
     # Near-black wallpaper: lift panels and hover so they read as steps (>= 1.10),
     # and unfocused borders so they show against the black (~1.7).

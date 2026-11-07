@@ -25,7 +25,7 @@
     accent2 = "9A9A9A";
   };
   # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
-  # `just theme-check blade` checks the result.
+  # `vx theme check blade` checks the result.
   overrides = {
     # Pure greyscale (chroma 0); E0E0E0 was plain grey. Pale gold for the lit hair
     # and the sword's glint, on the palette's warm-neutral hue (~90).

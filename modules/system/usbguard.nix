@@ -4,8 +4,8 @@
 # devices present on the very first boot are remembered as allowed.
 #
 # A blocked device shows a notification. Then:
-#   just usb            list devices and their numbers
-#   just usb-allow 12   allow device 12 for good
+#   vx usb            list devices and their numbers
+#   vx usb allow 12   allow device 12 for good
 {
   flake.modules.nixos.base =
     { pkgs, lib, ... }:

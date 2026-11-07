@@ -1,7 +1,7 @@
 # Custom installer ISO: the normal minimal NixOS ISO plus this flake's
 # installer on PATH, flakes enabled, and a login message that says what to do.
 #
-#   Build (any x86_64 Linux, WSL works, or the GitHub Action):
+#   Build (any x86_64 Linux, WSL works, or the GitHub Action): `vx iso`, or
 #     nix build .#nixosConfigurations.installer.config.system.build.isoImage
 #
 # Boot it, connect Wi-Fi with `nmtui` (or plug in Ethernet), run `sudo install-nixos`.
@@ -26,8 +26,8 @@
           boot.supportedFilesystems.zfs = lib.mkForce false; # ZFS lags the latest kernel; not needed
           environment.systemPackages = [
             self.packages.x86_64-linux.install-nixos
+            self.packages.x86_64-linux.vx # in a clone at ~/nixos, `vx install` runs this same installer
             pkgs.git
-            pkgs.just
           ];
           image.baseName = lib.mkForce "nixos-arc-installer";
           services.getty.helpLine = ''

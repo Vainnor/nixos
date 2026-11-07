@@ -3,7 +3,7 @@
 # and leaves everything else on the Mac alone: apps, Homebrew, ~/.ssh/config.
 #
 # First time (once):  sudo nix run nix-darwin -- switch --flake ~/Programing/nixos
-# After that:         just mac
+# After that:         vx switch
 { inputs, config, ... }:
 let
   inherit (config) meta;
@@ -48,7 +48,6 @@ in
 
       environment.systemPackages = with pkgs; [
         nh
-        just
         sops
         age
         ssh-to-age

@@ -3,7 +3,7 @@
 # OBS captures each one separately (see streaming/obs.nix for the track map).
 # "System" is the default output, so anything you don't route lands there;
 # move apps to Game/Chat/Music/Browser in pwvucontrol (it remembers per app).
-# Needs meta.audioOutput (`just audio-devices` lists the names).
+# Needs meta.audioOutput (`vx audio devices` lists the names).
 # Mic cleanup goes through EasyEffects.
 { config, ... }:
 let

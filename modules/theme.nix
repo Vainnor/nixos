@@ -5,7 +5,7 @@
 #
 # Wallpapers live in assets/wallpapers/<name>/ (wide.png for the ultrawide,
 # 4k.png for the left monitor and the Mac, theme.nix with a matching palette).
-# `just wallpaper <name>` swaps both, and everything re-themes to match.
+# `vx wallpaper <name>` swaps both, and everything re-themes to match.
 # The style is flat and square everywhere: no rounded corners, shadows or blur.
 #
 # Known gaps: 1Password, Cider, RustDesk and TeamSpeak draw their own theme and

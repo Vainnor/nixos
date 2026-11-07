@@ -1,13 +1,13 @@
 # The Mac's apps, through Homebrew (nix-darwin writes the Brewfile and runs
-# `brew bundle` on every `just mac`). Command-line tools that Nix already
-# provides (fish, starship, eza, git, gh, just, sops, opentofu, ...) are not
+# `brew bundle` on every `vx switch`). Command-line tools that Nix already
+# provides (fish, starship, eza, git, gh, sops, opentofu, ...) are not
 # listed here; see users/vainnor.nix and dev/tooling.nix.
 #
 # Nothing is ever removed automatically (cleanup = "none"): an app missing from
 # these lists just stays installed. Set cleanup = "uninstall" once the lists are
 # complete to make them exact.
 #
-# First time only: `just mac-adopt` hands the apps you installed by hand over
+# First time only: `vx mac adopt` hands the apps you installed by hand over
 # to Homebrew, otherwise `brew bundle` stops at "already an App at ...".
 #
 # Not in Homebrew, so installed by hand: Cider, NetBird, DaVinci Resolve,
@@ -19,7 +19,7 @@
       enable = true;
       onActivation = {
         cleanup = "none";
-        autoUpdate = false; # `just mac-upgrade` updates on purpose
+        autoUpdate = false; # `vx mac upgrade` updates on purpose
         upgrade = false;
       };
       global.autoUpdate = false;

@@ -5,7 +5,7 @@
     scheme = "Vainnor Slate";
     author = "vainnor";
     base00 = "10141B"; # background
-    # panels, bar modules. `just theme-check` WARNs: 1.07 step over base00 (wants 1.08).
+    # panels, bar modules. `vx theme check` WARNs: 1.07 step over base00 (wants 1.08).
     # Kept: these are the exact homelab README / LibreWolf userContent.css colours.
     base01 = "161B24";
     base02 = "1D232E"; # selection, raised surfaces

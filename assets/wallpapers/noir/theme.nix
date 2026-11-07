@@ -25,7 +25,7 @@
     accent2 = "8E939C";
   };
   # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
-  # `just theme-check noir` checks the result.
+  # `vx theme check noir` checks the result.
   overrides = {
     # Black-and-white photo; the generated silver CFD3DA had no colour as a fill.
     # Ice blue from the cool cast of the white glints (the palette's own hue, 262).

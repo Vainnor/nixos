@@ -3,7 +3,7 @@
 # projects on different versions (Python 3.12 vs 3.13, Node 20 vs 22, JDK 17
 # vs 21) never see each other and nothing is installed system-wide.
 #
-#   just new python ~/code/thing      (or: nix flake init -t ~/nixos#python)
+#   vx new python ~/code/thing      (or: nix flake init -t ~/nixos#python)
 { lib, ... }:
 let
   templates = {

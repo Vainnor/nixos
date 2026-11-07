@@ -2,7 +2,7 @@
 # and a Windows 11 VM that takes over the RX 7900 XTX ("single-GPU passthrough").
 #
 # How the Windows VM works:
-#   `just windows` starts it. A libvirt hook stops the Mango session, hands the
+#   `vx windows` starts it. A libvirt hook stops the Mango session, hands the
 #   GPU (and its HDMI/DP audio) to the VM, reserves 16 GB of hugepages, and the
 #   VM drives your monitors directly at near-native speed. The USB devices in
 #   meta.vfio.usb (keyboard, mouse, BEACN, headset, webcam) move into the VM.
@@ -13,7 +13,7 @@
 #   the whole Windows NVMe so the VM boots your real Windows install.
 #
 # "win11-lite" is a second, everyday Windows VM for light Windows-only apps:
-#   `just windows-lite` opens it in a window on your Linux desktop. No GPU
+#   `vx windows lite` opens it in a window on your Linux desktop. No GPU
 #   passthrough, 4 cores / 8 threads (half the CPU, shared with Linux), 8 GB
 #   RAM, its own disk. Graphics are a virtio display, with Windows' built-in
 #   software renderer handling Direct3D: fine for office tools, utilities and
@@ -450,7 +450,7 @@ in
               ]
               ++ lib.optional (vfio.windowsNvme or null != null) vfio.windowsNvme
             );
-        message = "meta.vfio PCI addresses must look like 0000:03:00.0 (see `just vm-gpu`).";
+        message = "meta.vfio PCI addresses must look like 0000:03:00.0 (see `vx vm gpu`).";
       };
     };
 }

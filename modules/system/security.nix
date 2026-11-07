@@ -7,7 +7,7 @@
       sudo = {
         execWheelOnly = true;
         wheelNeedsPassword = true;
-        # `just sudo-unlock` drops a timed NOPASSWD rule in here (RAM only, so
+        # `vx sudo unlock` drops a timed NOPASSWD rule in here (RAM only, so
         # a reboot always clears it). Last in the file, so it wins over %wheel.
         extraConfig = "@includedir /run/sudoers.d";
       };

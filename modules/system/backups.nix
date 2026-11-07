@@ -2,7 +2,7 @@
 #
 #   1. btrbk snapshots (local, instant): @home and @persistent every hour,
 #      kept 48 hours / 14 days / 6 weeks in @snapshots. Undo a deleted or
-#      broken file in seconds: `just snapshots`, then copy it back out of
+#      broken file in seconds: `vx snapshots`, then copy it back out of
 #      /.btrfs/@snapshots/<name>. Same disk, so NOT a backup against disk death.
 #
 #   2. restic to the homelab (off-site, encrypted, deduplicated), every night.

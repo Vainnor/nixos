@@ -28,12 +28,12 @@
 #   Super+Shift+F12  start/stop the STREAM (shift so it can't happen by accident)
 #
 # These files are only SEEDED: OBS owns them afterwards, so your changes in
-# OBS stick. `just obs-reset` backs them up and seeds fresh copies.
+# OBS stick. `vx obs reset` backs them up and seeds fresh copies.
 #
 # The look: a "Vainnor" variant of OBS's own Yami theme (themes/Vainnor.ovt),
 # rebuilt from the palette on every switch: square corners and the theme's
 # colours. It's picked in the seeded user.ini; on an existing setup choose it
-# once in Settings > Appearance (or `just obs-reset`).
+# once in Settings > Appearance (or `vx obs reset`).
 #
 # The Twitch stream key and StreamElements token come from sops
 # (secrets/secrets.yaml) once meta.secretsReady is on.

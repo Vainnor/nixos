@@ -5,7 +5,7 @@
 # Needs Windows 11 **Pro** (Home has no RDP server) with a password login
 # (not a PIN) for meta.windowsUser. The unattended install runs the guest
 # setup (install.bat from the WINAPPS CD) at first login; see _unattend.nix.
-# Then on Linux: `just winapps-setup` picks which apps to add.
+# Then on Linux: `vx winapps setup` picks which apps to add.
 #
 # The RDP password comes from sops (winapps/rdp_password) when secrets are
 # on; otherwise a password box (zenity) asks for it. It never lands in a

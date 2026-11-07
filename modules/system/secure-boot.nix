@@ -6,7 +6,7 @@
 #   2. In the BIOS, put Secure Boot into Setup Mode (clear/delete keys), reboot.
 #      systemd-boot enrolls your keys + Microsoft's (Windows and the 7900 XTX
 #      option ROM need them). Then turn Secure Boot ON in the BIOS.
-#   3. `just tpm-enroll`: the disk unlocks itself as long as Secure Boot state
+#   3. `vx tpm enroll`: the disk unlocks itself as long as Secure Boot state
 #      (PCR 7) is unchanged. Your passphrase keeps working as a fallback.
 { inputs, ... }:
 {

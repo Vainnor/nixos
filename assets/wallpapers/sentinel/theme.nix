@@ -25,7 +25,7 @@
     accent2 = "948A82";
   };
   # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
-  # `just theme-check sentinel` checks the result.
+  # `vx theme check sentinel` checks the result.
   overrides = {
     # Grey-on-black engraving with a faint warm cast (bg 0A0808); D6CEC6 was grey.
     # A candlelit bone tone along that warm hue.

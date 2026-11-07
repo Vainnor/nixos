@@ -10,7 +10,7 @@
 # The GPU's fans stay with LACT (gaming/gpu.nix), so don't give them a curve
 # in CoolerControl too; two programs fighting over one fan makes it pulse.
 #
-# Curves are kept on /persistent, so they survive reboots. `just fans-save`
+# Curves are kept on /persistent, so they survive reboots. `vx fans save`
 # copies them into this repo (assets/coolercontrol/config.toml); a fresh
 # install starts with that file instead of a blank setup.
 {

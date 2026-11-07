@@ -10,7 +10,7 @@
 #   Super+Shift+N      notifications       Super+Shift+Escape  power menu
 #   Super+Escape       lock                Super+W   wallpaper picker
 #
-# Hacking on it: `just shell-dev` stops the service and runs the shell from
+# Hacking on it: `vx shell dev` stops the service and runs the shell from
 # ~/nixos/shell with live reload (save a .qml file, it updates). Ctrl+C, then
 # `systemctl --user start vshell` to go back.
 { config, ... }:
@@ -106,7 +106,7 @@ in
     {
       home.packages = [
         vshell
-        pkgs.quickshell # `qs` for `just shell-dev`
+        pkgs.quickshell # `qs` for `vx shell dev`
       ]
       ++ (with pkgs; [
         libqalculate # calculator tab

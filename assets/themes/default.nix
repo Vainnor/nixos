@@ -24,7 +24,7 @@
 # Keys: any base16 slot (base00..base0F, also scheme/author) or an `extra`
 # key (border, accent2). Hex without '#'. Slot overrides need a local palette
 # (a base16 name has no scheme here to change); extra keys always apply.
-# `just theme-check` checks the result for contrast and colour.
+# `vx theme check` checks the result for contrast and colour.
 {
   theme,
   wallpaper,

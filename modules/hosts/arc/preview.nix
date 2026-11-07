@@ -1,4 +1,4 @@
-# `just preview`: boot arc's real config in a QEMU window, on any Linux machine
+# `vx preview`: boot arc's real config in a QEMU window, on any Linux machine
 # with Nix (the PC's current distro, or WSL). Same desktop, apps, theme and
 # services, so problems show up here and not on the real drive.
 #

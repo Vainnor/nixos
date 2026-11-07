@@ -129,7 +129,7 @@
             "is_floating:1,app_id:virt-manager,title:^New VM$"
             # Steam (X11, app_id is its WM_CLASS): everything but the main window.
             "is_floating:1,app_id:^steam$,title:^(Friends List|Steam Settings|Screenshot Manager|Sign in to Steam|Steam - Self Updater|Properties - .*|Install - .*|Uninstall - .*)$"
-            # The light Windows VM (`just windows-lite`): fullscreen on the
+            # The light Windows VM (`vx windows lite`): fullscreen on the
             # ultrawide; the SPICE agent then sizes Windows to 3440x1440.
             "is_fullscreen:1,monitor:model:VG34VQL3A,app_id:virt-viewer"
           ];

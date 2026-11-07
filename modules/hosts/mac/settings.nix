@@ -1,5 +1,5 @@
-# macOS settings, so a fresh Mac behaves the same after one `just mac`.
-# Change one here, run `just mac`; some need a log out to show everywhere.
+# macOS settings, so a fresh Mac behaves the same after one `vx switch`.
+# Change one here, run `vx switch`; some need a log out to show everywhere.
 { config, ... }:
 let
   user = config.meta.username;
