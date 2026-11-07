@@ -277,6 +277,24 @@ wallpaper-add name wide uhd:
     git add "$d"
     echo "Added $d. Tweak $d/theme.nix if a colour feels off, then: just wallpaper {{ name }}"
 
+# Check every palette's contrast and colour (or some: `just theme-check noir eye`; `--quiet` shows only problems)
+theme-check *args:
+    python3 -I scripts/theme-check.py {{ args }}
+
+# Run the shell from ~/nixos/shell with live reload (save a .qml file, it updates). Ctrl+C to stop.
+shell-dev:
+    #!/usr/bin/env bash
+    systemctl --user stop vshell
+    trap 'systemctl --user start vshell' EXIT
+    VSHELL_THEME="$(systemctl --user show vshell -p Environment --value | tr ' ' '\n' | sed -n 's/^VSHELL_THEME=//p')" \
+    VSHELL_WALLPAPER="$(systemctl --user show vshell -p Environment --value | tr ' ' '\n' | sed -n 's/^VSHELL_WALLPAPER=//p')" \
+    VSHELL_AUDIO_OUTPUT="$(systemctl --user show vshell -p Environment --value | tr ' ' '\n' | sed -n 's/^VSHELL_AUDIO_OUTPUT=//p')" \
+      qs -p "$HOME/nixos/shell"
+
+# Shell logs (errors from the QML show up here)
+shell-log:
+    journalctl --user -u vshell -f -n 100
+
 # ── Streaming / audio ──────────────────────────────────────────────────
 
 # List audio outputs; put the real one's name in meta.audioOutput

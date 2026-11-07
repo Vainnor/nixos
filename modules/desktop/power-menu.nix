@@ -1,4 +1,4 @@
-# Power menu in fuzzel: Super+Shift+Escape, or the power icon in waybar.
+# Power menu: in the shell (desktop/shell.nix), Super+Shift+Escape or [ off ] in the bar.
 # "Reboot to Windows" sets a one-time EFI BootNext to Windows Boot Manager,
 # so the next boot goes to Windows and the one after is back to NixOS.
 { config, ... }:
@@ -31,32 +31,5 @@ in
           ];
         }
       ];
-    };
-
-  flake.modules.homeManager.desktop =
-    { pkgs, ... }:
-    let
-      powerMenu = pkgs.writeShellScriptBin "power-menu" ''
-        choice="$(printf '%s\n' \
-          "󰌾  Lock" \
-          "󰍃  Log out" \
-          "󰤄  Suspend" \
-          "󰜉  Reboot" \
-          "󰖳  Reboot to Windows" \
-          "󰐥  Shut down" \
-          | fuzzel --dmenu --prompt '⏻ ' --lines 6 --width 24)" || exit 0
-        case "$choice" in
-          *Lock) loginctl lock-session ;;
-          *"Log out") mmsg dispatch quit ;;
-          *Suspend) systemctl suspend ;;
-          *"Reboot to Windows") sudo /run/current-system/sw/bin/reboot-to-windows ;;
-          *Reboot) systemctl reboot ;;
-          *"Shut down") systemctl poweroff ;;
-        esac
-      '';
-    in
-    {
-      home.packages = [ powerMenu ];
-      wayland.windowManager.mango.settings.bind = [ "SUPER+SHIFT,Escape,spawn,power-menu" ];
     };
 }

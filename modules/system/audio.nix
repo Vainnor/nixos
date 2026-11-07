@@ -66,22 +66,10 @@ in
     };
 
   flake.modules.homeManager.desktop =
-    { pkgs, lib, ... }:
-    let
-      # Volume keys control the real device, so every channel follows them,
-      # and swayosd shows the level on screen.
-      device = lib.optionalString (output != null) " --device ${output}";
-      osd = "${pkgs.swayosd}/bin/swayosd-client";
-    in
+    { pkgs, ... }:
     {
-      services.swayosd.enable = true;
-      wayland.windowManager.mango.settings.bind = [
-        "NONE,XF86AudioRaiseVolume,spawn,${osd} --output-volume raise${device}"
-        "NONE,XF86AudioLowerVolume,spawn,${osd} --output-volume lower${device}"
-        "NONE,XF86AudioMute,spawn,${osd} --output-volume mute-toggle${device}"
-        "NONE,XF86AudioMicMute,spawn,${osd} --input-volume mute-toggle"
-      ];
-
+      # Volume keys and the on-screen level: the shell (desktop/shell.nix). It
+      # turns the real device (meta.audioOutput), so every channel follows.
       services.easyeffects.enable = true;
       home.packages = with pkgs; [
         pwvucontrol
