@@ -12,7 +12,7 @@
             editor = false; # no editing kernel params at the boot menu
           };
           efi.canTouchEfiVariables = true;
-          timeout = 3;
+          timeout = 0; # straight to NixOS; hold Space while booting for the menu (older generations)
         };
         kernelPackages = pkgs.linuxPackages_latest;
       };
