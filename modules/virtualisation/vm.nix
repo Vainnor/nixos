@@ -260,15 +260,12 @@ in
       reserve = vfio != null && vfio.reserveGpu or false;
       used = "/run/${vmName}-gpu-used";
       # Runs instead of `modprobe amdgpu` (amdgpu loads for the CPU's
-      # graphics): before amdgpu can grab the 7900 XTX, shrink its BARs to
-      # 8 GB and 8 MB (Windows gives code 43 with the full 32 GB / 256 MB, and
-      # the sizes can't change once a driver holds the card) and give it to
-      # vfio-pci.
+      # graphics): give the 7900 XTX to vfio-pci before amdgpu can grab it.
+      # Its BARs stay at the firmware's sizes (Re-Size BAR off in the BIOS:
+      # 256 MB / 2 MB, the setup known to work with this card in Windows).
       claimGpu = pkgs.writeShellScript "claim-gpu-for-vfio" ''
         d=/sys/bus/pci/devices/${vfio.gpu}
         if [ ! -e "$d/driver" ]; then
-          echo 13 > "$d/resource0_resize" 2>/dev/null || true
-          echo 3 > "$d/resource2_resize" 2>/dev/null || true
           echo vfio-pci > "$d/driver_override"
           ${pkgs.kmod}/bin/modprobe vfio-pci
           echo ${vfio.gpu} > /sys/bus/pci/drivers_probe
