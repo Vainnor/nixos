@@ -31,6 +31,10 @@
     #              "caelus" (assets/themes); or any base16 name
     wallpaper = "eye";
     theme = "match";
+    # Colours laid over the active theme last, for quick experiments, e.g.
+    # { base0D = "E0A040"; border = "3A3F3C"; } (see assets/themes/default.nix).
+    # Lasting fixes go in the theme file's own `overrides`. `just theme-check` checks them.
+    themeOverrides = { };
 
     # PipeWire name of your real output (BEACN Studio headphones or the HyperX
     # dongle), e.g. "alsa_output.usb-....analog-stereo". Run `just audio-devices`

@@ -24,4 +24,13 @@
     border = "313137";
     accent2 = "D9605A";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check eye` checks the result.
+  overrides = {
+    # Near-black wallpaper: lift panels and hover so they read as steps (>= 1.10),
+    # and unfocused borders so they show against the black (~1.7).
+    base01 = "17171C";
+    base02 = "202024";
+    border = "38383F";
+  };
 }

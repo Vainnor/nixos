@@ -24,4 +24,13 @@
     border = "393444";
     accent2 = "F2B8C8";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check lavender` checks the result.
+  overrides = {
+    # Lift panels and hover a touch so they read as steps over base00 (>= 1.10),
+    # and unfocused borders with them (~1.7 against base00).
+    base01 = "1D1926";
+    base02 = "262131";
+    border = "3E394A";
+  };
 }

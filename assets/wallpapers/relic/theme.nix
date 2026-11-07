@@ -24,4 +24,19 @@
     border = "373B29";
     accent2 = "9C9A88";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check relic` checks the result.
+  overrides = {
+    # Grey print on an olive-black ground (bg 0B0C06); D8D6C8 was grey.
+    # Lichen / old-paper yellow-green along that olive hue.
+    base0D = "C8C890";
+    # The image has no colour, so the generator made greyed-out terminal colours
+    # (dusty-pink "red"); use the same set as the other near-black images.
+    base08 = "D47D7D";
+    base09 = "D19A75";
+    base0A = "D1B675";
+    base0B = "91C577";
+    base0C = "70C2C2";
+    base0E = "B28CD9";
+  };
 }

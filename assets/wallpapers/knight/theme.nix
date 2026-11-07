@@ -24,4 +24,24 @@
     border = "2F2F34";
     accent2 = "7F8794";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check knight` checks the result.
+  overrides = {
+    # Grey-on-black engraving; B9C2CF was grey. Steel blue along the palette's
+    # cool tint (hue 257), deeper than noir's so the two differ.
+    base0D = "8FB0E6";
+    # The image has no colour, so the generator made greyed-out terminal colours
+    # (dusty-pink "red"); use the same set as the other near-black images.
+    base08 = "D47D7D";
+    base09 = "D19A75";
+    base0A = "D1B675";
+    base0B = "91C577";
+    base0C = "70C2C2";
+    base0E = "B28CD9";
+    # Near-black wallpaper: lift panels and hover so they read as steps (>= 1.10),
+    # and unfocused borders so they show against the black (~1.7).
+    base01 = "161618";
+    base02 = "1F1F23";
+    border = "38383E";
+  };
 }

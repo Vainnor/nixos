@@ -24,4 +24,24 @@
     border = "343030";
     accent2 = "948A82";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check sentinel` checks the result.
+  overrides = {
+    # Grey-on-black engraving with a faint warm cast (bg 0A0808); D6CEC6 was grey.
+    # A candlelit bone tone along that warm hue.
+    base0D = "D4AC8C";
+    # The image has no colour, so the generator made greyed-out terminal colours
+    # (dusty-pink "red"); use the same set as the other near-black images.
+    base08 = "D47D7D";
+    base09 = "D19A75";
+    base0A = "D1B675";
+    base0B = "91C577";
+    base0C = "70C2C2";
+    base0E = "B28CD9";
+    # Near-black wallpaper: lift panels and hover so they read as steps (>= 1.10),
+    # and unfocused borders so they show against the black (~1.7).
+    base01 = "181515";
+    base02 = "221F1F";
+    border = "3B3737";
+  };
 }

@@ -24,4 +24,24 @@
     border = "303034";
     accent2 = "8E939C";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check noir` checks the result.
+  overrides = {
+    # Black-and-white photo; the generated silver CFD3DA had no colour as a fill.
+    # Ice blue from the cool cast of the white glints (the palette's own hue, 262).
+    base0D = "9FB8E8";
+    # The image has no colour, so the generator made greyed-out terminal colours
+    # (dusty-pink "red"); use the same set as the other near-black images.
+    base08 = "D47D7D";
+    base09 = "D19A75";
+    base0A = "D1B675";
+    base0B = "91C577";
+    base0C = "70C2C2";
+    base0E = "B28CD9";
+    # Near-black wallpaper: lift panels and hover so they read as steps (>= 1.10),
+    # and unfocused borders so they show against the black (~1.7).
+    base01 = "161618";
+    base02 = "1F1F23";
+    border = "38383C";
+  };
 }

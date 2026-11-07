@@ -24,4 +24,13 @@
     border = "322C43";
     accent2 = "E57AD4";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check violet` checks the result.
+  overrides = {
+    # Near-black wallpaper: lift panels and hover so they read as steps (>= 1.10),
+    # and unfocused borders so they show against the black (~1.7).
+    base01 = "1A1528";
+    base02 = "241D35";
+    border = "3C3551";
+  };
 }

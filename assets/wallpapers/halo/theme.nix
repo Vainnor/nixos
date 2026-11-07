@@ -24,4 +24,13 @@
     border = "2E363D";
     accent2 = "E0606A";
   };
+  # Hand fixes on top of the generated palette above (see assets/themes/default.nix);
+  # `just theme-check halo` checks the result.
+  overrides = {
+    # Lift panels and hover a touch so they read as steps over base00 (>= 1.10),
+    # and unfocused borders with them (~1.7 against base00).
+    base01 = "141A1E";
+    base02 = "1C2329";
+    border = "323B42";
+  };
 }
