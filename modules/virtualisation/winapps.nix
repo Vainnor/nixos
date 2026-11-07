@@ -1,5 +1,6 @@
 # WinApps: Windows apps from the win11-lite VM as normal windows on the Linux
-# desktop (RDP RemoteApp). They show up in fuzzel like any other app.
+# desktop (RDP RemoteApp). They show up in the launcher (Super+Space) like
+# any other app.
 #
 # Needs Windows 11 **Pro** (Home has no RDP server) with a password login
 # (not a PIN) for meta.windowsUser. The unattended install runs the guest
@@ -7,7 +8,8 @@
 # Then on Linux: `just winapps-setup` picks which apps to add.
 #
 # The RDP password comes from sops (winapps/rdp_password) when secrets are
-# on; otherwise fuzzel asks for it. It never lands in a plain config file.
+# on; otherwise a password box (zenity) asks for it. It never lands in a
+# plain config file.
 { inputs, config, ... }:
 let
   inherit (config) meta;
@@ -50,7 +52,7 @@ in
         if [ -r /run/secrets/winapps/rdp_password ]; then
           cat /run/secrets/winapps/rdp_password
         else
-          ${lib.getExe pkgs.fuzzel} --dmenu --password --prompt 'Windows password: ' --lines 0 --width 30
+          ${lib.getExe pkgs.zenity} --password --title 'windows password'
         fi
       '';
     in

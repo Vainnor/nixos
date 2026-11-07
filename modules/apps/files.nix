@@ -21,5 +21,26 @@
 
   flake.modules.homeManager.desktop = {
     wayland.windowManager.mango.settings.bind = [ "SUPER+SHIFT,f,spawn,thunar" ];
+
+    # "open terminal here" as a Thunar custom action that runs Ghostty directly.
+    # Thunar's built-in one goes through exo-open and the Xfce helpers, which
+    # need xfce4-settings (not installed) and don't know Ghostty.
+    xdg.configFile."Thunar/uca.xml".text = ''
+      <?xml version="1.0" encoding="UTF-8"?>
+      <actions>
+      <action>
+        <icon>utilities-terminal</icon>
+        <name>open terminal here</name>
+        <submenu></submenu>
+        <unique-id>1700000000000000-1</unique-id>
+        <command>ghostty --working-directory=%f</command>
+        <description>open ghostty in this folder</description>
+        <range></range>
+        <patterns>*</patterns>
+        <startup-notify/>
+        <directories/>
+      </action>
+      </actions>
+    '';
   };
 }

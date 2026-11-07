@@ -27,7 +27,7 @@ is just the list of aspects it picks.
 | Aspect | What you get |
 |---|---|
 | `base` | systemd-boot via lanzaboote, LUKS + TPM, impermanence, NetBird, SSH (NetBird only), sops, fish, hourly snapshots, restic, USBGuard, Prometheus exporters |
-| `desktop` | Mango, greetd, waybar, fuzzel (apps, emoji, calculator, files), swaync, swayosd, gtklock, Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
+| `desktop` | Mango, greetd, vshell (our own Quickshell shell: bar, launcher with apps, clipboard, emoji, calculator and files, notifications, control center, volume OSD, power menu, lock screen), Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
 | `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT (GPU fans), CoolerControl (CPU and case fans), instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
 | `streaming` | OBS seeded with the Vainnor overlays: a profile, 3 themed scene collections, BEACN-style audio tracks, global hotkeys, an EasyEffects mic chain, Chatterino |
 | `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, kubectl, k9s, OpenTofu, Ansible, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
@@ -55,8 +55,7 @@ Versions are the ones pinned in `flake.lock` today; `just update` moves them.
 | **Desktop** | <img alt="Mango: nightly" src="https://img.shields.io/badge/Mango-nightly-243142?style=flat-square&labelColor=1D232E"> |  |
 |  | <img alt="Ghostty: 1.4.0" src="https://img.shields.io/badge/Ghostty-1.4.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.4.0` |
 |  | <img alt="LibreWolf: 159.0" src="https://img.shields.io/badge/LibreWolf-159.0-B5A8F5?style=flat-square&labelColor=1D232E&logo=librewolf&logoColor=F5F7FB"> | `159.0` |
-|  | <img alt="fuzzel: 1.15.0" src="https://img.shields.io/badge/fuzzel-1.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.15.0` |
-|  | <img alt="Waybar: 0.15.0" src="https://img.shields.io/badge/Waybar-0.15.0-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.15.0` |
+|  | <img alt="Quickshell: 0.3.2" src="https://img.shields.io/badge/Quickshell-0.3.2-B5A8F5?style=flat-square&labelColor=1D232E"> | `0.3.2` (vshell) |
 |  | <img alt="Stylix: from the wallpaper" src="https://img.shields.io/badge/Stylix-from%20the%20wallpaper-243142?style=flat-square&labelColor=1D232E"> |  |
 | **Graphics** | <img alt="Mesa RADV: 26.2.6" src="https://img.shields.io/badge/Mesa%20RADV-26.2.6-B5A8F5?style=flat-square&labelColor=1D232E&logo=amd&logoColor=F5F7FB"> | `26.2.6` |
 |  | <img alt="PipeWire: 1.6.9" src="https://img.shields.io/badge/PipeWire-1.6.9-B5A8F5?style=flat-square&labelColor=1D232E"> | `1.6.9` |
@@ -253,10 +252,10 @@ The answer file is in `modules/virtualisation/_unattend.nix`. The full `win11` V
 <details>
 <summary><b>WinApps (Windows apps as Linux windows)</b></summary>
 
-WinApps runs apps from `win11-lite` as separate windows on your desktop (over RDP RemoteApp). They appear in fuzzel like normal apps.
+WinApps runs apps from `win11-lite` as separate windows on your desktop (over RDP RemoteApp). They appear in the launcher (Super+Space) like normal apps.
 1. `win11-lite` installs as Windows 11 **Pro** (Home has no RDP), with the account named in `meta.windowsUser`. Log in with a **password**, not a PIN.
 2. The first-login script already ran the WINAPPS setup. To redo it, open the **WINAPPS** CD in the VM, right-click `install.bat`, choose *Run as administrator*, and reboot.
-3. Set the password: run `just secrets-edit` and fill in `winapps.rdp_password`. If secrets aren't set up yet, fuzzel asks for the password instead.
+3. Set the password: run `just secrets-edit` and fill in `winapps.rdp_password`. If secrets aren't set up yet, a password box asks for it instead.
 4. With the VM running, run `just winapps-setup` and pick apps. Later, `just winapps-add` adds apps you install, and `just winapps-desktop` opens the whole Windows desktop.
 
 Your Linux home folder shows up in Windows as `\\tsclient\home`. The VM pauses itself after 5 idle minutes.
@@ -300,8 +299,12 @@ Run `just` to see all recipes. The common ones:
 
 | Keys | What it does |
 |---|---|
-| Super+Space · Super+; · Super+C · Super+/ | Apps · emoji · calculator · find a file |
-| Super+Shift+N · Super+Alt+N | Notification panel · night light on/off |
+| Super+Space · Super+V | Launcher · clipboard history |
+| Super+; · Super+C · Super+/ | Emoji · calculator · find a file |
+| Super+A · Super+Shift+N | Control center · notifications |
+| Super+Shift+Escape · Super+Escape | Power menu (log out, reboot, Windows) · lock |
+| Super+Alt+N | Night light on/off |
+| Print · Shift+Print · Super+Print | Screenshot a region · the focused monitor · the focused window |
 | Super+Shift+F | Thunar (Super+E is yazi) |
 | Alt+F10 · Alt+F9 | Save the last 2 minutes · the last 30 seconds (instant replay, `~/Videos/Replays`) |
 | Super+F1…F8 | OBS: switch scene |
@@ -311,7 +314,7 @@ Run `just` to see all recipes. The common ones:
 
 Each wallpaper is a folder in `assets/wallpapers/`: `wide.png` (3440x1440) goes on the ultrawide,
 `4k.png` on the left monitor and the Mac, and `theme.nix` is a palette made from the image. Every
-themed app (bar, borders, terminal, launcher, LibreWolf, GTK, the lock screen) follows it.
+themed app (the shell, borders, terminal, LibreWolf, GTK, Qt, the lock screen) follows it.
 
 ```sh
 just wallpapers                       # list them; * marks the current one

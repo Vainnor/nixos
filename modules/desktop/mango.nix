@@ -5,8 +5,18 @@
     imports = [ inputs.mango.nixosModules.mango ];
     programs.mango.enable = true;
 
-    # Electron/Chromium apps (Vesktop, Zed's webviews, Steam) use Wayland.
+    # Electron/Chromium apps (Vesktop, 1Password, Zed's webviews) use Wayland.
+    # Steam doesn't: its client is X11 (CEF under XWayland) either way.
     environment.sessionVariables.NIXOS_OZONE_WL = "1";
+
+    # A keyring for apps that store passwords through the Secret portal or
+    # libsecret (Mango's portal config already sends Secret to gnome-keyring).
+    # Unlocked with your login password at the greetd login.
+    services.gnome.gnome-keyring.enable = true;
+    security.pam.services.greetd.enableGnomeKeyring = true;
+    # 1Password is the SSH agent (apps/1password.nix); keep the keyring's own
+    # SSH agent (gcr) off so the two don't fight over SSH_AUTH_SOCK.
+    services.gnome.gcr-ssh-agent.enable = false;
   };
 
   flake.modules.homeManager.desktop =
@@ -65,11 +75,8 @@
           bind = [
             # Apps
             "SUPER,Return,spawn,ghostty"
-            "SUPER,space,spawn,fuzzel"
             "SUPER,b,spawn,librewolf"
             "SUPER,e,spawn,ghostty -e yazi"
-            "SUPER,v,spawn_shell,cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
-            "SUPER,Escape,spawn,loginctl lock-session"
 
             # Windows
             "SUPER,q,killclient,"
@@ -87,11 +94,10 @@
             "SUPER+SHIFT,comma,tagmon,left"
             "SUPER+SHIFT,period,tagmon,right"
 
-            # Session
+            # Session (log out is in the power menu, Super+Shift+Escape)
             "SUPER+SHIFT,r,reload_config"
-            "SUPER+SHIFT,e,quit"
 
-            # Media keys (volume keys live in system/audio.nix)
+            # Media keys (volume keys and the shell's own binds: desktop/shell.nix)
             "NONE,XF86AudioPlay,spawn,playerctl play-pause"
             "NONE,XF86AudioNext,spawn,playerctl next"
             "NONE,XF86AudioPrev,spawn,playerctl previous"
@@ -111,6 +117,16 @@
             "is_floating:1,app_id:com.saivert.pwvucontrol"
             "is_floating:1,app_id:org.rncbc.qpwgraph"
             "is_floating:1,title:^Picture-in-Picture$"
+            # Dialogs and small tool windows float (floating windows open centred).
+            # Rules split on commas, so the title regexes can't contain one.
+            "is_floating:1,app_id:^polkit-gnome-authentication-agent-1$"
+            "is_floating:1,app_id:^xdg-desktop-portal-gtk$" # file pickers
+            "is_floating:1,app_id:^(zenity|org.gnome.Zenity)$"
+            "is_floating:1,width:1000,height:700,app_id:^com.github.wwmm.easyeffects$"
+            "is_floating:1,app_id:^1[Pp]assword$,title:^Quick Access"
+            "is_floating:1,app_id:virt-manager,title:^New VM$"
+            # Steam (X11, app_id is its WM_CLASS): everything but the main window.
+            "is_floating:1,app_id:^steam$,title:^(Friends List|Steam Settings|Screenshot Manager|Sign in to Steam|Steam - Self Updater|Properties - .*|Install - .*|Uninstall - .*)$"
             # The light Windows VM (`just windows-lite`): fullscreen on the
             # ultrawide; the SPICE agent then sizes Windows to 3440x1440.
             "is_fullscreen:1,monitor:model:VG34VQL3A,app_id:virt-viewer"

@@ -3,3 +3,13 @@
 #sidebar-box { padding-inline-start: 0px !important; }
 
 * { border-radius: 0px !important; }
+
+/* No shadows: menus, panels (app menu, extensions, downloads) and the urlbar dropdown. */
+:root, menupopup, panel {
+  --panel-shadow: none !important;
+  --panel-shadow-margin: 0px !important;
+}
+menupopup, panel, .menupopup-arrowscrollbox, .panel-arrowcontent,
+#urlbar, #urlbar-background, .urlbarView {
+  box-shadow: none !important;
+}

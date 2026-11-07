@@ -1,12 +1,15 @@
 # ONE place for the look of everything. Change `meta.theme` (flake/meta.nix)
-# and every themed app follows: GTK/Qt, Ghostty, fuzzel, waybar, swaync,
-# the lock screen, the boot splash, LibreWolf, Vesktop, Zed, btop, bat, fish, ... plus Mango and vis,
+# and every themed app follows: GTK/Qt, Ghostty, the shell (desktop/shell.nix),
+# the boot splash, LibreWolf, Vesktop, Zed, btop, bat, fish, ... plus Mango and vis,
 # which read the palette below by hand because Stylix has no target for them.
 #
 # Wallpapers live in assets/wallpapers/<name>/ (wide.png for the ultrawide,
 # 4k.png for the left monitor and the Mac, theme.nix with a matching palette).
 # `just wallpaper <name>` swaps both, and everything re-themes to match.
 # The style is flat and square everywhere: no rounded corners, shadows or blur.
+#
+# Known gaps: 1Password, Cider, RustDesk and TeamSpeak draw their own theme and
+# ignore all of this. Set each one to its dark mode by hand, once, in its settings.
 {
   inputs,
   config,
@@ -86,8 +89,19 @@ in
           name = "Bibata-Modern-Classic";
           size = 24;
         };
+        # Set here so home-manager picks it up too (GTK, and Qt below).
+        icons = {
+          enable = true;
+          package = pkgs.papirus-icon-theme;
+          dark = "Papirus-Dark";
+          light = "Papirus-Light";
+        };
       };
-      fonts.packages = [ pkgs.noto-fonts-cjk-sans ];
+      fonts.packages = with pkgs; [
+        noto-fonts-cjk-sans
+        noto-fonts-cjk-serif
+        nerd-fonts.symbols-only # icon glyphs for apps that don't ask for a Nerd Font by name
+      ];
     };
 
   # Same palette and fonts on the Mac (terminal tools, bat, btop, fzf, vis, ...).
@@ -154,10 +168,99 @@ in
             '';
       };
       border = if palette.extra.border != null then palette.extra.border else c.base02;
+
+      # Qt colours for qt5ct/qt6ct, one entry per QPalette role in Qt's order:
+      # WindowText Button Light Midlight Dark Mid Text BrightText ButtonText
+      # Base Window Shadow Highlight HighlightedText Link LinkVisited
+      # AlternateBase NoRole ToolTipBase ToolTipText PlaceholderText Accent
+      qtColors =
+        let
+          row = roles: lib.concatMapStringsSep ", " (r: "#ff${c.${r}}") roles;
+          active = row [
+            "base05"
+            "base01"
+            "base03"
+            "base02"
+            "base00"
+            "base02"
+            "base05"
+            "base07"
+            "base05"
+            "base01"
+            "base00"
+            "base00"
+            "base0D"
+            "base00"
+            "base0D"
+            "base0E"
+            "base00"
+            "base00"
+            "base01"
+            "base05"
+            "base04"
+            "base0D"
+          ];
+          disabled = row [
+            "base04"
+            "base01"
+            "base03"
+            "base02"
+            "base00"
+            "base02"
+            "base04"
+            "base04"
+            "base04"
+            "base01"
+            "base00"
+            "base00"
+            "base03"
+            "base05"
+            "base04"
+            "base04"
+            "base00"
+            "base00"
+            "base01"
+            "base04"
+            "base03"
+            "base03"
+          ];
+        in
+        pkgs.writeText "base16.conf" ''
+          [ColorScheme]
+          active_colors=${active}
+          inactive_colors=${active}
+          disabled_colors=${disabled}
+        '';
+      qtctSettings = {
+        Appearance = {
+          style = "Fusion";
+          custom_palette = true;
+          color_scheme_path = "${qtColors}";
+          icon_theme = config.stylix.icons.dark;
+          standard_dialogs = "xdgdesktopportal";
+        };
+        Fonts = with config.stylix.fonts; {
+          fixed = ''"${monospace.name},${toString sizes.applications}"'';
+          general = ''"${sansSerif.name},${toString sizes.applications}"'';
+        };
+      };
     in
     {
       stylix.targets.rofi.enable = false; # not used; silences an upstream warning
       stylix.targets.gtk.extraCss = "* { border-radius: 0; box-shadow: none; }";
+
+      # Qt: Fusion with the palette, set through qt5ct/qt6ct, instead of Stylix's
+      # Kvantum theme. That theme draws its round corners and menu shadows as
+      # curves inside an SVG (not as rx/ry or a setting), so there is nothing
+      # small to patch; Fusion has no shadows or blur and follows the palette.
+      # Fusion still rounds buttons by about 2px; Qt has no setting for that.
+      stylix.targets.qt.enable = false;
+      qt = {
+        enable = true;
+        platformTheme.name = "qtct";
+        qt5ctSettings = qtctSettings;
+        qt6ctSettings = qtctSettings;
+      };
       stylix.targets.librewolf.profileNames = [
         "default"
         "i2p"
@@ -172,6 +275,7 @@ in
         scratchpad_color = argb c.base0E;
         global_color = argb c.base0C;
         overlay_color = argb c.base0A;
+        cursor_theme = config.stylix.cursor.name;
         cursor_size = 24;
       };
 

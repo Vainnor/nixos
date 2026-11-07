@@ -30,6 +30,11 @@
 # These files are only SEEDED: OBS owns them afterwards, so your changes in
 # OBS stick. `just obs-reset` backs them up and seeds fresh copies.
 #
+# The look: a "Vainnor" variant of OBS's own Yami theme (themes/Vainnor.ovt),
+# rebuilt from the palette on every switch: square corners and the theme's
+# colours. It's picked in the seeded user.ini; on an existing setup choose it
+# once in Settings > Appearance (or `just obs-reset`).
+#
 # The Twitch stream key and StreamElements token come from sops
 # (secrets/secrets.yaml) once meta.secretsReady is on.
 # Still yours to do in OBS: connect the Twitch account for VOD track (Settings > Stream),
@@ -72,7 +77,12 @@ in
     };
 
   flake.modules.homeManager.streaming =
-    { pkgs, lib, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      ...
+    }:
     let
       json = pkgs.formats.json { };
       ini = pkgs.formats.ini { };
@@ -406,6 +416,7 @@ in
         };
         "user.ini" = ini.generate "user.ini" {
           General.FirstRun = true; # skip the auto-configuration wizard
+          Appearance.Theme = obsThemeId;
           Basic = {
             Profile = "Vainnor";
             ProfileDir = "Vainnor";
@@ -417,6 +428,67 @@ in
       };
 
       seeds = sceneFiles // profile;
+
+      # OBS 30+ themes: a variant (.ovt) only overrides Yami's variables, so
+      # it survives OBS updates as long as the variable names stay. A few
+      # widgets in Yami hard-code a 2-4px radius and keep it.
+      obsThemeId = "com.vainnor.Yami.Flat";
+      obsTheme =
+        let
+          c = config.lib.stylix.colors;
+        in
+        ''
+          @OBSThemeMeta {
+              name: 'Vainnor';
+              id: '${obsThemeId}';
+              extends: 'com.obsproject.Yami';
+              author: 'vainnor';
+              dark: 'true';
+          }
+
+          @OBSThemeVars {
+              --grey1: #${c.base03};
+              --grey2: #${c.base03};
+              --grey3: #${c.base02};
+              --grey4: #${c.base02};
+              --grey5: #${c.base01};
+              --grey6: #${c.base01};
+              --grey7: #${c.base00};
+              --grey8: #${c.base00};
+
+              --bg_window: #${c.base00};
+              --bg_base: #${c.base01};
+              --bg_preview: #${c.base00};
+
+              /* Filled "selected" states stay a surface colour so white text
+                 stays readable; the accent is for outlines and focus. */
+              --primary: #${c.base02};
+              --primary_light: #${c.base03};
+              --primary_lighter: #${c.base0D};
+              --primary_dark: #${c.base01};
+              --primary_darker: #${c.base01};
+
+              --warning: #${c.base0A};
+              --danger: #${c.base08};
+
+              --text: #${c.base05};
+              --text_light: #${c.base06};
+              --text_muted: #${c.base04};
+
+              --border_color: #${c.base02};
+              --input_border_focus: #${c.base0D};
+              --tab_border_selected: #${c.base0D};
+              --highlight_color: #${c.base0D};
+              --palette_link: #${c.base0D};
+              --palette_linkVisited: #${c.base0E};
+
+              --border_radius: 0px;
+              --border_radius_small: 0px;
+              --border_radius_large: 0px;
+              --toggle_radius: 0px;
+              --action_row_collapse_radius: 0px;
+          }
+        '';
 
       # Overlay settings (js/config.js), regenerated on every switch. Edit here,
       # not in the file. Secrets and the WebSocket password are added at activation.
@@ -462,15 +534,15 @@ in
           libnotify
         ];
         text = ''
-          pw=$(jq -r .server_password "${wsConfig}" 2>/dev/null) || { notify-send -a OBS "OBS WebSocket isn't set up yet"; exit 1; }
+          pw=$(jq -r .server_password "${wsConfig}" 2>/dev/null) || { notify-send -a obs "obs websocket isn't set up yet"; exit 1; }
           export OBS_WEBSOCKET_URL="obsws://127.0.0.1:4455/$pw"
           if [ "''${1:-}" = scene ]; then
             # "Vainnor Purple Gameplay" -> theme "Purple"; scenes are per theme.
             theme=$(obs-cmd scene current | sed -n 's/^Current scene: Vainnor \(Mono\|Horror\|Purple\) .*/\1/p')
             target="Vainnor ''${theme:-${defaultTheme}} $2"
-            obs-cmd scene switch "$target" >/dev/null && notify-send -a OBS -t 1500 "Scene" "$2"
+            obs-cmd scene switch "$target" >/dev/null && notify-send -a obs -t 1500 "scene" "$2"
           else
-            out=$(obs-cmd "$@") && notify-send -a OBS -t 2000 "OBS" "$out"
+            out=$(obs-cmd "$@") && notify-send -a obs -t 2000 "obs" "$out"
           fi
         '';
       };
@@ -488,6 +560,8 @@ in
           "SUPER,F10,spawn_shell,obs-ctl audio toggle 'Audio: Mic'"
           "SUPER+SHIFT,F12,spawn_shell,obs-ctl streaming toggle"
         ];
+
+      xdg.configFile."obs-studio/themes/Vainnor.ovt".text = obsTheme;
 
       home.file.".local/share/vainnor-overlays" = {
         source = overlays;

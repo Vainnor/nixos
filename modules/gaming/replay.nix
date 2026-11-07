@@ -22,7 +22,7 @@ in
     { pkgs, ... }:
     let
       onSave = pkgs.writeShellScript "replay-saved" ''
-        ${pkgs.libnotify}/bin/notify-send -a "Instant replay" -i media-record "Clip saved" "$(basename "$1")"
+        ${pkgs.libnotify}/bin/notify-send -a "instant replay" -i media-record "clip saved" "$(basename "$1")"
       '';
     in
     {
