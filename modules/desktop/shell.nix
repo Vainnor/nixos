@@ -8,7 +8,7 @@
 #   Super+;            emoji               Super+C   calculator
 #   Super+/            files               Super+A   control center
 #   Super+Shift+N      notifications       Super+Shift+Escape  power menu
-#   Super+Escape       lock
+#   Super+Escape       lock                Super+W   wallpaper picker
 #
 # Hacking on it: `just shell-dev` stops the service and runs the shell from
 # ~/nixos/shell with live reload (save a .qml file, it updates). Ctrl+C, then
@@ -70,6 +70,37 @@ in
         )
       );
       wallpaper = if palette.wallpapers != null then palette.wallpapers.wide else config.stylix.image;
+      # Every wallpaper with its images and matching palette (overrides applied),
+      # so the picker can preview and recolour the shell before the rebuild.
+      wallpapers = pkgs.writeText "vshell-wallpapers.json" (
+        builtins.toJSON (
+          map (
+            name:
+            let
+              p = import ../../assets/themes (
+                meta
+                // {
+                  wallpaper = name;
+                  theme = "match";
+                }
+              );
+            in
+            {
+              inherit name;
+              wide = "${p.wallpapers.wide}";
+              uhd = "${p.wallpapers.uhd}";
+              colors = p.scheme // {
+                border = if p.extra.border != null then p.extra.border else p.scheme.base02;
+                accent2 = if p.extra.accent2 != null then p.extra.accent2 else p.scheme.base0F;
+              };
+            }
+          ) (
+            builtins.filter (n: builtins.pathExists (../../assets/wallpapers + "/${n}/wide.png")) (
+              builtins.attrNames (builtins.readDir ../../assets/wallpapers)
+            )
+          )
+        )
+      );
       ipc = "vshell ipc call";
     in
     {
@@ -95,6 +126,7 @@ in
           X-Restart-Triggers = [
             "${src}"
             "${theme}"
+            "${wallpapers}"
           ];
         };
         Service = {
@@ -102,6 +134,8 @@ in
           Environment = [
             "VSHELL_THEME=${theme}"
             "VSHELL_WALLPAPER=${wallpaper}"
+            "VSHELL_WALLPAPER_NAME=${toString meta.wallpaper}"
+            "VSHELL_WALLPAPERS=${wallpapers}"
             "VSHELL_AUDIO_OUTPUT=${toString meta.audioOutput}"
             # Programs the shell starts (nmcli, cliphist, qalc, mmsg, sudo, ...).
             "PATH=/run/wrappers/bin:/etc/profiles/per-user/${meta.username}/bin:/run/current-system/sw/bin"
@@ -119,6 +153,7 @@ in
         "SUPER,c,spawn,${ipc} panels toggleTab launcher calc"
         "SUPER,slash,spawn,${ipc} panels toggleTab launcher files"
         "SUPER,a,spawn,${ipc} panels toggle control"
+        "SUPER,w,spawn,${ipc} panels toggle wallpaper"
         "SUPER+SHIFT,n,spawn,${ipc} panels toggle notifications"
         "SUPER+SHIFT,Escape,spawn,${ipc} panels toggle power"
         "SUPER,Escape,spawn,${ipc} lock lock"

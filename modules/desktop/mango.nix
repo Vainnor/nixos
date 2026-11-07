@@ -114,6 +114,8 @@
           ];
 
           window_rule = [
+            # `vx wallpaper` started from the shell's wallpaper picker
+            "is_floating:1,width:900,height:500,title:^vx-rebuild$"
             "is_floating:1,app_id:com.saivert.pwvucontrol"
             "is_floating:1,app_id:org.rncbc.qpwgraph"
             "is_floating:1,title:^Picture-in-Picture$"

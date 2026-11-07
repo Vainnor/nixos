@@ -8,6 +8,7 @@ import qs.bar
 import qs.notifications
 import qs.control
 import qs.launcher
+import qs.wallpaper
 
 // vshell: the desktop shell (bar, notifications, control center, OSD,
 // launcher, power menu, lock screen). Square and flat; colours from Theme.
@@ -29,6 +30,7 @@ ShellRoot {
     Launcher {}
     PowerMenu {}
     LockScreen {}
+    WallpaperPicker {}
 
     // Keybinds and scripts talk to the shell through these:
     //   vshell ipc call panels toggle control
