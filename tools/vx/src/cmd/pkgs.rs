@@ -1,0 +1,11 @@
+//! (stub, being written)
+use crate::ctx::Ctx;
+use anyhow::Result;
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+pub enum Cmd {}
+
+pub fn run(_ctx: &Ctx, cmd: Cmd) -> Result<()> {
+    match cmd {}
+}
