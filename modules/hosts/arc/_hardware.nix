@@ -11,8 +11,7 @@
     "usb_storage"
     "sd_mod"
   ];
-  # amdgpu loads after the initrd, not in it: the gaming VM's card has to be
-  # set aside first (virtualisation/vm.nix, meta.vfio.reserveGpu).
+  # amdgpu in the initrd: see virtualisation/vm.nix (meta.vfio.reserveGpu).
   boot.kernelModules = [ "kvm-amd" ];
 
   # Zen 5, single CCD: no V-Cache core parking needed.

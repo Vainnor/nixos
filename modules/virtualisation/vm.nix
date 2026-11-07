@@ -412,11 +412,17 @@ in
       + lib.optionalString reserve ''
         install amdgpu ${claimGpu} $CMDLINE_OPTS
       '';
-      boot.initrd.kernelModules = lib.mkIf reserve [
-        "vfio_pci"
-        "vfio"
-        "vfio_iommu_type1"
-      ];
+      # amdgpu in the initrd for the boot splash, unless the card is reserved
+      # (then vfio-pci has to get to it first).
+      boot.initrd.kernelModules =
+        if reserve then
+          [
+            "vfio_pci"
+            "vfio"
+            "vfio_iommu_type1"
+          ]
+        else
+          [ "amdgpu" ];
 
       environment.etc = {
         "libvirt-templates/${liteName}.xml".source = liteXml;

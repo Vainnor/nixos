@@ -55,7 +55,7 @@
       # the Linux driver never touched (once Linux has used it, Windows shows
       # code 43 and a black screen). `gpu-linux` lends it to Linux until the
       # next reboot. false = Linux owns it and the VM takes it when it starts.
-      reserveGpu = true;
+      reserveGpu = false; # true: no picture from the card in Windows on this PC (tested Nov 2026)
       gpuAudioId = "1002:ab30"; # vendor:device of gpuAudio, from `just vm-gpu`
       # The card's video BIOS, dumped by `just vm-vbios` (kept on the PC, not
       # in this public repo). Without it the VM shows a black screen.
