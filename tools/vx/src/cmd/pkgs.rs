@@ -76,7 +76,8 @@ pub enum Cmd {
     /// List the packages added with vx, by machine
     Pkgs,
 
-    /// List files on the wiped root that will be lost at reboot (find state worth persisting)
+    /// List files on the wiped root that will be lost at reboot (see also `vx persist-check`)
+    #[command(hide = true)]
     Ephemeral,
 }
 

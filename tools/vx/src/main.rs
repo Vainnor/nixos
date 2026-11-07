@@ -43,6 +43,21 @@ pub enum Cmd {
 }
 
 fn main() {
+    // `vx ... | head`: stop quietly when the reader goes away instead of panicking.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        if msg.contains("Broken pipe") {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
+
     if let Err(e) = run() {
         ui::fail(&format!("{e:#}"));
         std::process::exit(1);
