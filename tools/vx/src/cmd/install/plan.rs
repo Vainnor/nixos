@@ -2,9 +2,9 @@
 //! that does the work (`engine`). The UI fills in a [`Plan`]; the engine
 //! carries it out and reports progress as [`Event`]s.
 //!
-//! Paths shared with the Nix side (modules/hosts/arc/_disko.nix,
-//! modules/system/secure-boot.nix) are the consts at the bottom. Change them
-//! in both places or not at all.
+//! Paths shared with the Nix side (modules/hosts/<name>/{host.json,disks.json,
+//! _hardware.nix}, modules/system/secure-boot.nix) are the consts and
+//! functions at the bottom. Change them in both places or not at all.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -213,12 +213,125 @@ impl fmt::Debug for Secret {
     }
 }
 
+/// The graphics card a host is set up for (host.json `gpu`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Gpu {
+    Amd,
+    Nvidia,
+    Intel,
+    #[default]
+    None,
+}
+
+impl Gpu {
+    pub const ALL: [Gpu; 4] = [Gpu::Amd, Gpu::Nvidia, Gpu::Intel, Gpu::None];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Gpu::Amd => "amd",
+            Gpu::Nvidia => "nvidia",
+            Gpu::Intel => "intel",
+            Gpu::None => "none",
+        }
+    }
+}
+
+/// Which machine of the flake this install is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostPlan {
+    /// Reinstall a host that's already in the repo (keeps its _hardware.nix and host.json).
+    Existing(String),
+    /// A new folder modules/hosts/<name>/ with host.json, disks.json and _hardware.nix.
+    New(NewHost),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewHost {
+    /// `[a-z][a-z0-9-]{0,30}`, not `mac`, not an existing host. Also the hostname.
+    pub name: String,
+    /// flake.modules.nixos.* names; always starts with "base".
+    pub aspects: Vec<String>,
+    pub gpu: Gpu,
+    /// system.stateVersion for the new host (install-data `stateVersion`).
+    pub state_version: String,
+}
+
+impl HostPlan {
+    /// nixosConfigurations attribute, folder name and hostname.
+    pub fn name(&self) -> &str {
+        match self {
+            HostPlan::Existing(n) => n,
+            HostPlan::New(h) => &h.name,
+        }
+    }
+
+    pub fn is_new(&self) -> bool {
+        matches!(self, HostPlan::New(_))
+    }
+}
+
+/// How the install talks to GitHub.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GitHubMode {
+    /// The login owns the upstream repo: push there.
+    Owner,
+    /// Someone else: their fork, cloned and pushed to; meta.nix is personalised.
+    Fork {
+        /// https clone URL of the fork.
+        url: String,
+        /// The fork's default branch (pushed to).
+        branch: String,
+    },
+    /// No GitHub: committed locally only.
+    Offline,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitHubPlan {
+    /// The GitHub login (None when offline).
+    pub login: Option<String>,
+    /// Upstream `owner/repo` (what Owner mode pushes to).
+    pub upstream: String,
+    pub mode: GitHubMode,
+    /// Push the install commit at the end (Owner may turn it off; always on for Fork).
+    pub push: bool,
+    /// Public SSH keys of the login (github.com/<login>.keys), for meta.nix in Fork mode.
+    pub keys: Vec<String>,
+    pub full_name: Option<String>,
+    pub email: Option<String>,
+}
+
+impl GitHubPlan {
+    pub fn offline(upstream: &str) -> Self {
+        GitHubPlan {
+            login: None,
+            upstream: upstream.into(),
+            mode: GitHubMode::Offline,
+            push: false,
+            keys: vec![],
+            full_name: None,
+            email: None,
+        }
+    }
+
+    /// Will the engine try to push?
+    pub fn pushes(&self) -> bool {
+        self.push && self.mode != GitHubMode::Offline
+    }
+
+    pub fn is_fork(&self) -> bool {
+        matches!(self.mode, GitHubMode::Fork { .. })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Plan {
     /// The repo copy the installer edits and installs from ([`WORK_REPO`]).
     pub flake: PathBuf,
-    /// nixosConfigurations attribute (always "arc" for now; `hostname` may differ).
-    pub host: String,
+    /// Which machine: an existing host or a new one. `settings.hostname` is its name.
+    pub host: HostPlan,
+    pub github: GitHubPlan,
     pub system: SystemDisk,
     pub data: Vec<DataDisk>,
     pub settings: Settings,
@@ -244,6 +357,8 @@ pub struct Machine {
     pub tpm: bool,
     /// Total RAM in GiB (swap size hint).
     pub ram_gb: u32,
+    /// The graphics card found by lspci (a new host's default).
+    pub gpu: Gpu,
 }
 
 /// Defaults and choices from the flake, from `install-data.json` (built by
@@ -260,6 +375,61 @@ pub struct InstallData {
     pub wallpapers: Vec<WallpaperInfo>,
     /// Theme names besides "match" (assets/themes).
     pub themes: Vec<String>,
+    /// Upstream GitHub owner and repo (from repoUrl). Empty in older data: see [`InstallData::upstream`].
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub repo: String,
+    /// Hosts in the repo (folders with a host.json).
+    #[serde(default)]
+    pub hosts: Vec<HostInfo>,
+    /// Features a new host can pick (flake.modules.nixos.*; `base` is always on).
+    #[serde(default)]
+    pub aspects: Vec<AspectInfo>,
+    /// system.stateVersion for new hosts.
+    #[serde(default, rename = "stateVersion")]
+    pub state_version: String,
+}
+
+impl InstallData {
+    /// (owner, repo) of upstream: the data's fields, else parsed from repo_url.
+    pub fn upstream(&self) -> (String, String) {
+        if !self.owner.is_empty() && !self.repo.is_empty() {
+            return (self.owner.clone(), self.repo.clone());
+        }
+        parse_github_url(&self.repo_url).unwrap_or_else(|| (self.owner.clone(), self.repo.clone()))
+    }
+}
+
+/// `https://github.com/<owner>/<repo>(.git)` (or git@github.com:owner/repo) -> (owner, repo).
+pub fn parse_github_url(url: &str) -> Option<(String, String)> {
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .or_else(|| url.strip_prefix("git@github.com:"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
+    let rest = rest.trim_end_matches('/');
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let (o, r) = rest.split_once('/')?;
+    (!o.is_empty() && !r.is_empty() && !r.contains('/')).then(|| (o.to_string(), r.to_string()))
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct HostInfo {
+    pub name: String,
+    #[serde(default)]
+    pub aspects: Vec<String>,
+    #[serde(default)]
+    pub gpu: Gpu,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct AspectInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub default: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -298,6 +468,10 @@ pub struct Outcome {
     pub host_key_carried: bool,
     /// What to do next, one plain sentence each (BIOS Secure Boot steps, secrets, ...).
     pub next_steps: Vec<String>,
+    /// Where the install commit was pushed (`owner/repo branch`), None when it wasn't.
+    pub pushed: Option<String>,
+    /// Why it wasn't pushed (offline, failed, turned off).
+    pub not_pushed: Option<String>,
 }
 
 // ---------------------------------------------------------------- shared with Nix
@@ -316,8 +490,44 @@ pub const OLD_MOUNT: &str = "/run/vx-install/old";
 pub const INSTALLED_KEYS: &str = "/persistent/etc/keys";
 /// One-time key the first boot uses to enroll the TPM, then removes.
 pub const TPM_ENROLL_KEY: &str = "/persistent/install/tpm-enroll.key";
-/// Disk choices for the Nix side, relative to the repo.
-pub const DISKS_JSON: &str = "modules/hosts/arc/disks.json";
+/// gh's config dir on the installer (hosts.yml holds the login; RAM).
+pub const GH_CONFIG: &str = "/tmp/vx-install/gh";
+
+/// A host's folder, relative to the repo.
+pub fn host_dir(host: &str) -> String {
+    format!("modules/hosts/{host}")
+}
+/// Disk choices for the Nix side (read by the shared disko module), relative to the repo.
+pub fn disks_json_path(host: &str) -> String {
+    format!("modules/hosts/{host}/disks.json")
+}
+/// A host's description (makes it a nixosConfiguration), relative to the repo.
+pub fn host_json_path(host: &str) -> String {
+    format!("modules/hosts/{host}/host.json")
+}
+/// nixos-generate-config's hardware part, relative to the repo.
+pub fn hardware_path(host: &str) -> String {
+    format!("modules/hosts/{host}/_hardware.nix")
+}
+
+/// The shape of host.json (written by the engine for new hosts, read by the flake).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostJson {
+    pub name: String,
+    pub system: String,
+    #[serde(rename = "stateVersion")]
+    pub state_version: String,
+    pub aspects: Vec<String>,
+    pub gpu: Gpu,
+    /// EDID model of the main screen; null = the first one.
+    #[serde(rename = "primaryMonitor")]
+    pub primary_monitor: Option<String>,
+    /// PipeWire sink name; null = none picked.
+    #[serde(rename = "audioOutput")]
+    pub audio_output: Option<String>,
+    #[serde(rename = "replayMonitor")]
+    pub replay_monitor: String,
+}
 
 /// The shape of disks.json (written by the engine, read by _disko.nix).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,5 +564,58 @@ mod tests {
         assert_eq!(j["data"][1]["readOnly"], false);
         let back: DisksJson = serde_json::from_value(j).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn host_json_shape() {
+        let h = HostJson {
+            name: "forge".into(),
+            system: "x86_64-linux".into(),
+            state_version: "26.11".into(),
+            aspects: vec!["base".into(), "desktop".into()],
+            gpu: Gpu::Amd,
+            primary_monitor: None,
+            audio_output: None,
+            replay_monitor: "screen".into(),
+        };
+        let j = serde_json::to_value(&h).unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({ "name": "forge", "system": "x86_64-linux", "stateVersion": "26.11",
+                "aspects": ["base", "desktop"], "gpu": "amd", "primaryMonitor": null, "audioOutput": null,
+                "replayMonitor": "screen" })
+        );
+        assert_eq!(disks_json_path("forge"), "modules/hosts/forge/disks.json");
+    }
+
+    #[test]
+    fn old_install_data_still_parses() {
+        let d: InstallData = serde_json::from_str(
+            r#"{"host":"arc","repoUrl":"https://github.com/vainnor/nixos.git","flake":"/nix/store/x",
+               "defaults":{"hostname":"arc","username":"vainnor","timeZone":"UTC","wallpaper":"eye","theme":"match"},
+               "wallpapers":[],"themes":[]}"#,
+        )
+        .unwrap();
+        assert!(d.hosts.is_empty() && d.aspects.is_empty());
+        assert_eq!(d.upstream(), ("vainnor".to_string(), "nixos".to_string()));
+        let d: InstallData = serde_json::from_str(
+            r#"{"host":"arc","repoUrl":"x","flake":"/nix/store/x","owner":"vainnor","repo":"nixos","stateVersion":"26.11",
+               "defaults":{"hostname":"arc","username":"vainnor","timeZone":"UTC","wallpaper":"eye","theme":"match"},
+               "wallpapers":[],"themes":[],"hosts":[{"name":"arc","aspects":["base","gaming"],"gpu":"amd"}],
+               "aspects":[{"name":"gaming","description":"steam","default":false}]}"#,
+        )
+        .unwrap();
+        assert_eq!(d.hosts[0].gpu, Gpu::Amd);
+        assert_eq!(d.state_version, "26.11");
+        assert!(!d.aspects[0].default);
+    }
+
+    #[test]
+    fn github_urls() {
+        let p = |s: &str| parse_github_url(s);
+        assert_eq!(p("https://github.com/vainnor/nixos"), Some(("vainnor".into(), "nixos".into())));
+        assert_eq!(p("git@github.com:someone/nixos.git"), Some(("someone".into(), "nixos".into())));
+        assert_eq!(p("https://gitlab.com/a/b"), None);
+        assert_eq!(p("https://github.com/a"), None);
     }
 }

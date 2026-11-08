@@ -87,7 +87,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
             Ok(())
         }
         Cmd::Host => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             ctx.run(ctx.nix().args(["run", "nixpkgs#ssh-to-age", "--", "-i", HOST_KEY]))
         }
         Cmd::AddHost { key } => {

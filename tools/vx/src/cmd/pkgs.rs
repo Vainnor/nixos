@@ -116,7 +116,7 @@ const DARWIN: &str = "aarch64-darwin";
 
 fn this_system(ctx: &Ctx) -> &'static str {
     match ctx.host {
-        Host::Arc => LINUX,
+        Host::NixOs => LINUX,
         Host::Mac => DARWIN,
     }
 }
@@ -712,11 +712,11 @@ fn rel(repo: &Path, p: &Path) -> String {
 
 fn offer_switch(ctx: &Ctx, arc: bool, mac: bool, yes: bool, no_switch: bool) -> Result<()> {
     let here = match ctx.host {
-        Host::Arc => arc,
+        Host::NixOs => arc,
         Host::Mac => mac,
     };
     let other = match ctx.host {
-        Host::Arc => mac.then_some("mac"),
+        Host::NixOs => mac.then_some("mac"),
         Host::Mac => arc.then_some("arc"),
     };
     if let Some(o) = other {
@@ -767,7 +767,7 @@ fn list(ctx: &Ctx) -> Result<()> {
 // ── ephemeral ──────────────────────────────────────────────────────────
 
 fn ephemeral(ctx: &Ctx) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let mut c = ctx.sudo("find");
     c.args(["/", "-xdev", "-type", "f"]);
     for p in ["/proc/*", "/sys/*", "/run/*", "/tmp/*", "/etc/static/*"] {

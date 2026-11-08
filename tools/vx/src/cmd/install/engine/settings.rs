@@ -1,8 +1,9 @@
-//! Writing the installer's choices into the repo copy: meta.nix, the host
-//! file and disks.json. Same approach as `vx wallpaper` (desktop/wallpaper.rs):
-//! targeted regex replacements of whole `name = ...;` lines.
+//! Writing the installer's choices into the repo copy: meta.nix, a new host's
+//! host.json and disks.json. Same approach as `vx wallpaper`
+//! (desktop/wallpaper.rs): targeted replacements of whole `name = ...;`
+//! statements, never a rewrite of the file.
 
-use super::super::plan::{DisksJson, Plan, Settings};
+use super::super::plan::{DisksJson, HostJson, NewHost, Plan, Settings};
 use anyhow::{Result, bail};
 use regex::Regex;
 
@@ -39,15 +40,156 @@ pub fn edit_meta(text: &str, s: &Settings) -> Result<String> {
     set_line(&t, "theme", &s.theme, F)
 }
 
-/// The host file with `networking.hostName` set.
-pub fn edit_host(text: &str, hostname: &str, file: &str) -> Result<String> {
-    set_line(text, "networking.hostName", hostname, file)
+/// Where the one top-level `<key> = <value>;` statement is: (start of `key`,
+/// end just past its `;`). The value may span lines (lists, attrsets);
+/// strings and comments are skipped while looking for the `;`.
+fn statement(text: &str, key: &str, file: &str) -> Result<(usize, usize)> {
+    let re = Regex::new(&format!(r"(?m)^[ \t]*({}) = ", regex::escape(key))).unwrap();
+    let found: Vec<_> = re.captures_iter(text).collect();
+    if found.len() != 1 {
+        bail!("expected one `{key} = ...;` in {file}, found {}: update the installer (engine/settings.rs)", found.len());
+    }
+    let m = &found[0];
+    let start = m.get(1).unwrap().start();
+    let b = text.as_bytes();
+    let (mut i, mut depth) = (m.get(0).unwrap().end(), 0i32);
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'\'' if b.get(i + 1) == Some(&b'\'') => {
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == b'\'' && b[i + 1] == b'\'') {
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'#' => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' | b']' | b')' => depth -= 1,
+            b';' if depth == 0 => return Ok((start, i + 1)),
+            _ => {}
+        }
+        i += 1;
+    }
+    bail!("`{key} = ...` in {file} has no closing `;`")
+}
+
+/// Replace the whole `<key> = ...;` statement (any number of lines) with
+/// `<key> = <raw>;`, plus ` # <comment>` unless the line already has a comment.
+fn set_raw(text: &str, key: &str, raw: &str, comment: Option<&str>, file: &str) -> Result<String> {
+    let (s, e) = statement(text, key, file)?;
+    let mut new = format!("{key} = {raw};");
+    let rest_of_line = text[e..].split('\n').next().unwrap_or("");
+    if let Some(c) = comment
+        && !rest_of_line.trim_start().starts_with('#')
+    {
+        new.push_str(&format!(" # {c}"));
+    }
+    Ok(format!("{}{new}{}", &text[..s], &text[e..]))
+}
+
+/// The indentation of the line `key = ` is on.
+fn indent_of(text: &str, key: &str) -> String {
+    let re = Regex::new(&format!(r"(?m)^([ \t]*){} = ", regex::escape(key))).unwrap();
+    re.captures(text).map(|c| c[1].to_string()).unwrap_or_else(|| "    ".into())
+}
+
+/// A Nix list of strings, one per line, indented under `indent`.
+fn nix_list(items: &[String], indent: &str) -> String {
+    if items.is_empty() {
+        return "[ ]".into();
+    }
+    let mut s = "[\n".to_string();
+    for i in items {
+        s.push_str(&format!("{indent}  \"{}\"\n", nix_str(i)));
+    }
+    s.push_str(&format!("{indent}]"));
+    s
+}
+
+/// Someone else's install from their fork: their identity in meta.nix, and
+/// nothing of the owner's that would let the owner in or needs the owner's secrets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Personal {
+    pub full_name: String,
+    pub email: String,
+    /// Their public keys from GitHub: the only keys that can ssh in.
+    pub ssh_keys: Vec<String>,
+    /// The fork (https).
+    pub repo_url: String,
+    pub github_user: String,
+}
+
+/// meta.nix personalised for a fork (after [`edit_meta`]).
+pub fn personalise_meta(text: &str, p: &Personal) -> Result<String> {
+    const F: &str = "modules/flake/meta.nix";
+    let t = set_line(text, "fullName", &p.full_name, F)?;
+    let t = set_line(&t, "email", &p.email, F)?;
+    let t = set_line(&t, "repoUrl", &p.repo_url, F)?;
+    let t = match statement(&t, "githubUser", F) {
+        Ok(_) => set_line(&t, "githubUser", &p.github_user, F)?,
+        Err(_) => {
+            // Older meta.nix without it: add it under repoUrl.
+            let (_, e) = statement(&t, "repoUrl", F)?;
+            let ind = indent_of(&t, "repoUrl");
+            format!("{}\n{ind}githubUser = \"{}\";{}", &t[..e], nix_str(&p.github_user), &t[e..])
+        }
+    };
+    let ind = indent_of(&t, "sshKeys");
+    let t = set_raw(&t, "sshKeys", &nix_list(&p.ssh_keys, &ind), None, F)?;
+    let t = set_raw(&t, "signingKey", "null", Some("your ssh public key here to sign commits (from your ssh agent / 1password)"), F)?;
+    let t = set_raw(&t, "secretsReady", "false", None, F)?;
+    let t = set_raw(&t, "resticReady", "false", None, F)?;
+    set_raw(&t, "binaryCache", "null", None, F)
 }
 
 /// disks.json: pretty, with a trailing newline.
 pub fn disks_json(plan: &Plan) -> String {
     let d = DisksJson { system: plan.system.clone(), data: plan.data.clone() };
     serde_json::to_string_pretty(&d).expect("plain data serializes") + "\n"
+}
+
+/// The Nix system of this machine (the installer runs on the machine it installs).
+pub fn nix_system() -> &'static str {
+    if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }
+}
+
+/// host.json for a new host: pretty, with a trailing newline. `base` first, always.
+pub fn host_json(h: &NewHost) -> String {
+    let mut aspects = vec!["base".to_string()];
+    aspects.extend(h.aspects.iter().filter(|a| a.as_str() != "base").cloned());
+    let j = HostJson {
+        name: h.name.clone(),
+        system: nix_system().into(),
+        state_version: h.state_version.clone(),
+        aspects,
+        gpu: h.gpu,
+        primary_monitor: None,
+        audio_output: None,
+        replay_monitor: "screen".into(),
+    };
+    serde_json::to_string_pretty(&j).expect("plain data serializes") + "\n"
+}
+
+/// A host name the flake can use: `[a-z][a-z0-9-]{0,30}`, and not taken by something else.
+pub fn host_name(s: &str) -> Result<(), String> {
+    let re = Regex::new(r"^[a-z][a-z0-9-]{0,30}$").unwrap();
+    if !re.is_match(s) || s.ends_with('-') {
+        return Err("name: start with a-z, then a-z 0-9 - (31 at most)".into());
+    }
+    if matches!(s, "mac" | "installer" | "default" | "base" | "nixos" | "localhost") {
+        return Err(format!("name: {s} is taken by the flake, pick another"));
+    }
+    Ok(())
 }
 
 /// Values that end up in Nix files, paths and shell lines: keep them plain.
@@ -103,26 +245,28 @@ mod tests {
     wallpaper = "eye";
     theme = "match";
     themeOverrides = { };
+
+    secretsReady = false;
+
+    sshKeys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores vainnor@Carsons-MBP.home"
+    ];
+
+    # Git commits are signed with this key.
+    signingKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz+SMhHHpCCHb5S4Ni0gGBPIIVCevddores";
+
+    resticReady = false;
+
+    binaryCache = {
+      endpoint = "https://cache.example.com"; # the homelab
+      cache = "nixos";
+    };
   };
 }
 "#
             .to_string()
         })
     }
-
-    /// A copy of modules/hosts/arc/default.nix (the part that matters).
-    const HOST: &str = r#"{ inputs, config, ... }:
-{
-  flake.modules.nixos.arc = {
-    imports = [ ./_disko.nix ];
-
-    networking.hostName = "arc";
-
-    # Set once at install time
-    system.stateVersion = "26.11";
-  };
-}
-"#;
 
     fn settings() -> Settings {
         Settings {
@@ -174,11 +318,79 @@ mod tests {
         assert_eq!(get_string(meta, "username").as_deref(), Some("vainnor"));
     }
 
+    fn personal() -> Personal {
+        Personal {
+            full_name: "Some One".into(),
+            email: "someone@example.com".into(),
+            ssh_keys: vec!["ssh-ed25519 AAAAsomeone1".into(), "ssh-rsa AAAAsomeone2".into()],
+            repo_url: "https://github.com/someone/nixos.git".into(),
+            github_user: "someone".into(),
+        }
+    }
+
     #[test]
-    fn host_edit() {
-        let out = edit_host(HOST, "forge", "default.nix").unwrap();
-        assert!(out.contains("    networking.hostName = \"forge\";\n"));
-        assert_eq!(out.replace("\"forge\"", "\"arc\""), HOST);
+    fn personalised_meta() {
+        let meta = &meta_text();
+        let owner_key = get_string(meta, "signingKey");
+        let out = personalise_meta(&edit_meta(meta, &settings()).unwrap(), &personal()).unwrap();
+        assert!(out.contains("    fullName = \"Some One\";\n"));
+        assert!(out.contains("    email = \"someone@example.com\";\n"));
+        assert!(out.contains("    repoUrl = \"https://github.com/someone/nixos.git\";\n"));
+        assert!(out.contains("    githubUser = \"someone\";\n"));
+        assert!(out.contains("    sshKeys = [\n      \"ssh-ed25519 AAAAsomeone1\"\n      \"ssh-rsa AAAAsomeone2\"\n    ];\n"), "{out}");
+        assert!(out.contains("    signingKey = null; # your ssh public key here"));
+        assert!(out.contains("    secretsReady = false;\n"));
+        assert!(out.contains("    resticReady = false;\n"));
+        assert!(out.contains("    binaryCache = null;\n"));
+        // Nothing of the owner's keys is left.
+        if let Some(k) = owner_key {
+            let body = k.split_whitespace().nth(1).unwrap();
+            assert!(!out.contains(body), "owner key still there");
+        }
+        assert!(!out.contains("AAAAC3NzaC1lZDI1NTE5AAAAIOC0Rp6DIXz"), "owner ssh key still there");
+        // Comments and the rest stay; it's still one statement per key.
+        assert!(out.contains("#   wallpaper: a folder in assets/wallpapers"));
+        assert_eq!(statement(&out, "binaryCache", "m").map(|_| ()).ok(), Some(()));
+        // Idempotent (a second run, or a fork that was personalised before).
+        assert_eq!(personalise_meta(&out, &personal()).unwrap(), out);
+        // No keys on GitHub: an empty list.
+        let none = personalise_meta(meta, &Personal { ssh_keys: vec![], ..personal() }).unwrap();
+        assert!(none.contains("    sshKeys = [ ];\n"));
+    }
+
+    #[test]
+    fn statements_span_lines() {
+        let t = "{\n  a = {\n    endpoint = \"x;y\"; # c;\n    keys = [ \"k\" ];\n  };\n  b = 1;\n  s = ''\n    q; ''\n  ;\n}\n";
+        let (s, e) = statement(t, "a", "t").unwrap();
+        assert_eq!(&t[s..e], "a = {\n    endpoint = \"x;y\"; # c;\n    keys = [ \"k\" ];\n  };");
+        assert_eq!(set_raw(t, "a", "null", None, "t").unwrap(), t.replace(&t[s..e], "a = null;"));
+        let (s, e) = statement(t, "s", "t").unwrap();
+        assert_eq!(&t[s..e], "s = ''\n    q; ''\n  ;");
+        assert!(statement(t, "missing", "t").is_err());
+    }
+
+    #[test]
+    fn new_host_json() {
+        let h = NewHost { name: "forge".into(), aspects: vec!["desktop".into(), "base".into(), "dev".into()], gpu: super::super::super::plan::Gpu::Nvidia, state_version: "26.11".into() };
+        let j = host_json(&h);
+        assert!(j.ends_with("}\n"));
+        let v: serde_json::Value = serde_json::from_str(&j).unwrap();
+        assert_eq!(v["name"], "forge");
+        assert_eq!(v["system"], nix_system());
+        assert_eq!(v["stateVersion"], "26.11");
+        assert_eq!(v["aspects"], serde_json::json!(["base", "desktop", "dev"]));
+        assert_eq!(v["gpu"], "nvidia");
+        assert!(v["primaryMonitor"].is_null() && v["audioOutput"].is_null());
+        assert_eq!(v["replayMonitor"], "screen");
+    }
+
+    #[test]
+    fn host_names() {
+        assert!(host_name("forge").is_ok());
+        assert!(host_name("pc-2").is_ok());
+        for bad in ["", "Forge", "2pc", "mac", "installer", "a_b", "pc-", &"a".repeat(32)] {
+            assert!(host_name(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

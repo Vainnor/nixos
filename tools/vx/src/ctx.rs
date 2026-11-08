@@ -8,8 +8,8 @@ use std::process::{Command, Stdio};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Host {
-    /// The NixOS PC.
-    Arc,
+    /// A NixOS machine of this flake (arc, or any other host in modules/hosts).
+    NixOs,
     /// The MacBook (nix-darwin).
     Mac,
 }
@@ -18,24 +18,49 @@ pub struct Ctx {
     pub repo: PathBuf,
     pub host: Host,
     pub verbose: bool,
+    /// `nixosConfigurations.<this>`: see [`nixos_host`].
+    nixos_host: String,
 }
 
-/// Names that match the flake outputs (`nixosConfigurations.arc`, `darwinConfigurations.<mac>`).
-pub const NIXOS_HOST: &str = "arc";
+/// The NixOS host used when this machine's own name isn't known (on the Mac,
+/// `vx diff` / `vx preview` of the PC).
+pub const DEFAULT_NIXOS_HOST: &str = "arc";
 pub const MAC_HOST: &str = "Vainnors-MacBook-Pro";
-/// SSH targets for `vx @arc ...` / `vx @mac ...` (NetBird names).
+/// SSH targets for `vx @arc ...` / `vx @mac ...` (NetBird names); other hosts
+/// are `<user>@<name>.netbird.cloud`.
 pub const ARC_SSH: &str = "vainnor@arc-211-139.netbird.cloud";
 pub const MAC_SSH: &str = "vainnor@vainnors-macbook-pro.netbird.cloud";
 
+/// The NixOS host to build: this machine's hostname on Linux (each host's
+/// hostname is its name in the flake), else "arc".
+pub fn nixos_host() -> String {
+    if cfg!(target_os = "macos") {
+        return DEFAULT_NIXOS_HOST.into();
+    }
+    host_from(std::fs::read_to_string("/proc/sys/kernel/hostname").ok().as_deref())
+}
+
+/// A hostname that can be a flake host, else the default.
+pub fn host_from(hostname: Option<&str>) -> String {
+    let h = hostname.map(str::trim).unwrap_or("");
+    let ok = !h.is_empty() && h.len() <= 63 && h.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if ok { h.to_string() } else { DEFAULT_NIXOS_HOST.into() }
+}
+
 impl Ctx {
     pub fn new(repo: Option<PathBuf>, verbose: bool) -> Result<Self> {
-        let host = if cfg!(target_os = "macos") { Host::Mac } else { Host::Arc };
+        let host = if cfg!(target_os = "macos") { Host::Mac } else { Host::NixOs };
         let home = PathBuf::from(std::env::var("HOME").context("HOME is not set")?);
         let repo = repo.unwrap_or_else(|| match host {
             Host::Mac => home.join("Programing/nixos"),
-            Host::Arc => home.join("nixos"),
+            Host::NixOs => home.join("nixos"),
         });
-        Ok(Self { repo, host, verbose })
+        Ok(Self { repo, host, verbose, nixos_host: nixos_host() })
+    }
+
+    /// The NixOS host this works on: `nixosConfigurations.<this>`, `nh -H <this>`.
+    pub fn nixos_host(&self) -> &str {
+        &self.nixos_host
     }
 
     /// The repo, checked to exist (most commands need it).
@@ -46,14 +71,14 @@ impl Ctx {
         Ok(&self.repo)
     }
 
-    pub fn is_arc(&self) -> bool {
-        self.host == Host::Arc
+    pub fn is_nixos(&self) -> bool {
+        self.host == Host::NixOs
     }
 
     /// Fail with a clear message when a command only makes sense on one machine.
     pub fn need(&self, host: Host) -> Result<()> {
         if self.host != host {
-            bail!("this only works on {}", match host { Host::Arc => "the PC (arc)", Host::Mac => "the Mac" });
+            bail!("this only works on {}", match host { Host::NixOs => "a NixOS machine (arc, ...)", Host::Mac => "the Mac" });
         }
         Ok(())
     }

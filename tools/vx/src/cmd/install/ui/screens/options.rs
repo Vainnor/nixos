@@ -38,18 +38,17 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
     let err = |res: Result<(), String>| res.err().map(|e| Span::styled(e, t.fg(t.red)));
     let focus = app.focus;
     let typed = |f: Field, v: &str| focus != Some(f) && !v.is_empty();
-    r.push(input_row(
-        t,
-        Field::Hostname,
-        "hostname",
-        &app.hostname,
-        focus == Some(Field::Hostname),
-        err(validate::hostname(&app.hostname.value)).filter(|_| typed(Field::Hostname, &app.hostname.value)),
-    ));
+    r.push(Row::info(Line::from(vec![
+        label(t, "hostname"),
+        Span::styled(app.host_name(), t.text()),
+        Span::styled("  the machine's name (machine step)", t.muted()),
+    ])));
     let default_user = app.data.as_ref().map(|d| d.defaults.username.as_str()).unwrap_or("");
     let user_note = match validate::username(&app.username.value) {
         Err(e) => Some(Span::styled(e, t.fg(t.red))),
-        Ok(()) if app.username.value != default_user => Some(Span::styled("the mac config uses this username too", t.fg(t.yellow))),
+        Ok(()) if app.username.value != default_user && !app.forking() => {
+            Some(Span::styled("the mac config uses this username too", t.fg(t.yellow)))
+        }
         Ok(()) => None,
     };
     r.push(input_row(t, Field::Username, "username", &app.username, focus == Some(Field::Username), user_note));
@@ -61,6 +60,26 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         focus == Some(Field::TimeZone),
         err(validate::time_zone(&app.time_zone.value, Some(Path::new("/etc/zoneinfo")))).filter(|_| typed(Field::TimeZone, &app.time_zone.value)),
     ));
+    if app.forking() {
+        r.push(Row::blank());
+        r.push(Row::info(Line::from(vec![Span::styled("you", t.bold()), Span::styled("  for meta.nix and your commits", t.muted())])));
+        r.push(input_row(
+            t,
+            Field::FullName,
+            "name",
+            &app.full_name,
+            focus == Some(Field::FullName),
+            err(validate::full_name(&app.full_name.value)).filter(|_| focus != Some(Field::FullName)),
+        ));
+        r.push(input_row(
+            t,
+            Field::Email,
+            "email",
+            &app.email,
+            focus == Some(Field::Email),
+            err(validate::email(&app.email.value)).filter(|_| focus != Some(Field::Email)),
+        ));
+    }
     r.push(Row::blank());
     r.push(Row::heading(t, "look"));
     let themes = app.theme_names();

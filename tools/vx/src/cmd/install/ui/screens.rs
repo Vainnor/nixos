@@ -1,6 +1,8 @@
 //! One module per screen: `rows` (what it shows) and the field actions.
 
 mod disks;
+pub mod github;
+mod machine;
 mod options;
 mod previous;
 mod progress;
@@ -19,6 +21,8 @@ pub fn rows(app: &App, width: u16) -> Vec<Row> {
     let w = width as usize;
     match app.screen {
         Screen::Welcome => welcome::rows(app, w),
+        Screen::GitHub => github::rows(app, w),
+        Screen::Machine => machine::rows(app, w),
         Screen::Previous => previous::rows(app, w),
         Screen::System => disks::system_rows(app, w),
         Screen::Data => disks::data_rows(app, w),
@@ -41,6 +45,8 @@ pub fn draw_body(f: &mut Frame, area: Rect, app: &App) {
 pub fn act(app: &mut App, f: Field, a: Act) {
     match f {
         Field::FetchLatest | Field::Start => welcome::act(app, f, a),
+        Field::GhLogin | Field::GhCancel | Field::GhSkip | Field::GhPush | Field::GhFork | Field::GhQuit => github::act(app, f, a),
+        Field::Host(_) | Field::NewHost | Field::Aspect(_) | Field::Gpu => machine::act(app, f, a),
         Field::Unlock | Field::SkipPrevious | Field::Carry(_) | Field::CarryNone | Field::Home(_) | Field::Backup(_) | Field::Rescan => {
             previous::act(app, f, a)
         }

@@ -116,7 +116,7 @@ pub enum ShellCmd {
 
 #[derive(Subcommand)]
 pub enum AudioCmd {
-    /// List audio outputs; put the real one's name in meta.audioOutput
+    /// List audio outputs; put the real one's name in audioOutput in modules/hosts/<host>/host.json
     Devices,
 }
 
@@ -191,7 +191,7 @@ fn shell_env(out: &str) -> Vec<(String, String)> {
 }
 
 fn shell(ctx: &Ctx, c: ShellCmd) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let sysd = |args: &[&str]| {
         let mut c = ctx.cmd("systemctl");
         c.arg("--user").args(args);
@@ -245,7 +245,7 @@ fn sinks(out: &str) -> Vec<&str> {
 }
 
 fn audio_devices(ctx: &Ctx) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let out = ctx.output(ctx.cmd("pactl").args(["list", "short", "sinks"]))?;
     for s in sinks(&out) {
         println!("{s}");
@@ -254,7 +254,7 @@ fn audio_devices(ctx: &Ctx) -> Result<()> {
 }
 
 fn obs_reset(ctx: &Ctx, yes: bool) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let home = PathBuf::from(std::env::var("HOME").context("HOME is not set")?);
     let obs = home.join(".config/obs-studio");
     let overlay = home.join(".local/share/vainnor-overlays/js/config.js");

@@ -2,13 +2,13 @@
 //! calls them in order and reports progress.
 
 use super::super::plan::{
-    Carry, DATA_KEYS, DISK_KEY, DISKS_JSON, DataMode, HomePlan, INSTALLED_KEYS, Outcome, Plan, TPM_ENROLL_KEY,
-    Unlocked, WORK,
+    Carry, DATA_KEYS, DISK_KEY, DataMode, GH_CONFIG, GitHubMode, HomePlan, HostPlan, INSTALLED_KEYS, Outcome, Plan,
+    TPM_ENROLL_KEY, Unlocked, WORK, disks_json_path, hardware_path, host_dir, host_json_path,
 };
 use super::disk::{self, find_part};
-use super::finish::{self, NextInput};
+use super::finish::{self, NextInput, PushState};
 use super::runner::{Cmd, Runner, shell_quote};
-use super::{previous, settings};
+use super::{github, previous, settings};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
@@ -19,7 +19,7 @@ pub const CRYPTROOT: &str = "cryptroot";
 pub const BACKUP_MOUNT: &str = "/run/vx-install/backup";
 /// Marker written by prepare_repo when WORK_REPO is a snapshot, not a clone.
 pub const SNAPSHOT_MARK: &str = "/tmp/vx-install/repo-is-snapshot";
-pub const COMMIT_MSG: &str = "chore(arc): install settings from vx install";
+pub const META_REL: &str = "modules/flake/meta.nix";
 
 pub fn carry_dir() -> PathBuf {
     Path::new(WORK).join("carry")
@@ -42,8 +42,11 @@ pub enum Step {
     Backup,
     Settings,
     Disks,
+    Hardware,
     Restore,
+    Commit,
     Install,
+    Push,
     Repo,
     Finish,
 }
@@ -57,9 +60,12 @@ impl Step {
             Step::Settings => "write settings into the repo",
             Step::Disks if plan.home == HomePlan::Keep => "replace the system, keep /home",
             Step::Disks => "partition and format",
+            Step::Hardware => "detect the hardware",
             Step::Restore if carries(plan) => "restore carried state",
             Step::Restore => "set up passwords and keys",
+            Step::Commit => "commit the settings",
             Step::Install => "install the system",
+            Step::Push => "push to github",
             Step::Repo => "put the repo in your home",
             Step::Finish => "finish",
         }
@@ -78,7 +84,18 @@ pub fn plan_steps(plan: &Plan) -> Vec<Step> {
     if matches!(plan.home, HomePlan::Backup { .. }) {
         v.push(Step::Backup);
     }
-    v.extend([Step::Settings, Step::Disks, Step::Restore, Step::Install, Step::Repo, Step::Finish]);
+    v.extend([Step::Settings, Step::Disks]);
+    // A new host's hardware config needs the disks mounted at /mnt; it's part
+    // of the commit, which has to exist before nixos-install builds the flake.
+    if plan.host.is_new() {
+        v.push(Step::Hardware);
+    }
+    v.extend([Step::Restore, Step::Commit, Step::Install]);
+    // After a good install, before the repo is copied home (so the copy knows it's pushed).
+    if plan.github.pushes() {
+        v.push(Step::Push);
+    }
+    v.extend([Step::Repo, Step::Finish]);
     v
 }
 
@@ -88,14 +105,29 @@ pub struct Run<'a> {
     pub r: Runner,
     /// The username in meta.nix before the installer changed it.
     pub old_default_user: Option<String>,
+    /// The email in meta.nix before the installer changed it.
+    pub meta_email: Option<String>,
     pub age: String,
     pub host_key_carried: bool,
+    pub push: PushState,
+    /// gh's login was copied into the new home.
+    pub gh_copied: bool,
     pub outcome: Option<Outcome>,
 }
 
 impl<'a> Run<'a> {
     pub fn new(plan: &'a Plan, r: Runner) -> Self {
-        Run { plan, r, old_default_user: None, age: String::new(), host_key_carried: false, outcome: None }
+        Run {
+            plan,
+            r,
+            old_default_user: None,
+            meta_email: None,
+            age: String::new(),
+            host_key_carried: false,
+            push: PushState::default(),
+            gh_copied: false,
+            outcome: None,
+        }
     }
 
     pub fn step(&mut self, s: Step) -> Result<()> {
@@ -105,8 +137,11 @@ impl<'a> Run<'a> {
             Step::Backup => self.backup(),
             Step::Settings => self.settings(),
             Step::Disks => self.disks(),
+            Step::Hardware => self.hardware(),
             Step::Restore => self.restore(),
+            Step::Commit => self.commit(),
             Step::Install => self.install(),
+            Step::Push => self.push(),
             Step::Repo => self.repo(),
             Step::Finish => self.finish(),
         }
@@ -126,6 +161,10 @@ impl<'a> Run<'a> {
 
     fn git(&self) -> Cmd {
         Cmd::new("git").args(["-C", &self.flake()])
+    }
+
+    fn host(&self) -> &'a str {
+        self.plan.host.name()
     }
 
     /// `nix build` an attribute of the repo copy; its store path.
@@ -199,39 +238,91 @@ impl<'a> Run<'a> {
 
     // ------------------------------------------------------------ 2. settings
 
+    /// meta.nix, the host's files and disks.json, staged (git-added) so the
+    /// flake sees them; committed later, together with the hardware config.
     fn settings(&mut self) -> Result<()> {
         let plan = self.plan;
         let repo = &plan.flake;
-        let meta_rel = "modules/flake/meta.nix";
-        let host_rel = format!("modules/hosts/{}/default.nix", plan.host);
-        let meta_p = repo.join(meta_rel);
-        let host_p = repo.join(&host_rel);
-
+        let host = self.host();
+        let meta_p = repo.join(META_REL);
         let meta = self.r.read(&meta_p, "")?;
-        let host = self.r.read(&host_p, "")?;
-        let mut email = "vx-install@localhost".to_string();
+        let personal = personal(plan, &meta);
         if !meta.is_empty() {
             self.old_default_user = settings::get_string(&meta, "username");
-            if let Some(e) = settings::get_string(&meta, "email") {
-                email = e;
+            self.meta_email = settings::get_string(&meta, "email");
+            let mut edited = settings::edit_meta(&meta, &plan.settings)?;
+            if let Some(p) = &personal {
+                edited = settings::personalise_meta(&edited, p)?;
             }
-            self.r.write(&meta_p, settings::edit_meta(&meta, &plan.settings)?.as_bytes(), 0o644)?;
+            self.r.write(&meta_p, edited.as_bytes(), 0o644)?;
         } else {
-            self.r.log(format!("edit {meta_rel}: username, flakePath, timeZone, wallpaper, theme"));
+            self.r.log(format!("edit {META_REL}: username, flakePath, timeZone, wallpaper, theme"));
+            if personal.is_some() {
+                self.r.log(format!(
+                    "edit {META_REL} for your fork: fullName, email, repoUrl, githubUser, sshKeys, signingKey, secretsReady, resticReady, binaryCache"
+                ));
+            }
         }
-        if !host.is_empty() {
-            self.r.write(&host_p, settings::edit_host(&host, &plan.settings.hostname, &host_rel)?.as_bytes(), 0o644)?;
-        } else {
-            self.r.log(format!("edit {host_rel}: networking.hostName"));
-        }
-        self.r.write(&repo.join(DISKS_JSON), settings::disks_json(plan).as_bytes(), 0o644)?;
 
-        self.r.run(self.git().args(["add", "--", meta_rel, &host_rel, DISKS_JSON]))?;
+        let mut paths = vec![META_REL.to_string()];
+        match &plan.host {
+            HostPlan::New(h) => {
+                let p = repo.join(host_json_path(host));
+                if !self.r.dry() && p.exists() {
+                    bail!("{} is already in the repo: go back and pick another name, or reinstall it", host_dir(host));
+                }
+                self.r.mkdir(&repo.join(host_dir(host)), 0o755)?;
+                self.r.write(&p, settings::host_json(h).as_bytes(), 0o644)?;
+                paths.push(host_json_path(host));
+            }
+            HostPlan::Existing(_) => {
+                if !self.r.exists(&repo.join(host_dir(host)), true) {
+                    bail!("the repo has no {}: go back and pick the machine again", host_dir(host));
+                }
+            }
+        }
+        self.r.write(&repo.join(disks_json_path(host)), settings::disks_json(plan).as_bytes(), 0o644)?;
+        paths.push(disks_json_path(host));
+        self.r.run(self.git().arg("add").arg("--").args(&paths))?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ 3b. hardware
+
+    /// A new host's _hardware.nix, from this machine (disks are mounted at /mnt
+    /// by now; fileSystems stay out: disko owns those).
+    fn hardware(&mut self) -> Result<()> {
+        let host = self.host();
+        let out = self.r.run(
+            Cmd::new("nixos-generate-config")
+                .args(["--no-filesystems", "--show-hardware-config", "--root", "/mnt"])
+                .quiet()
+                .fake(FAKE_HARDWARE),
+        )?;
+        if !out.contains('{') {
+            bail!("nixos-generate-config printed no hardware config");
+        }
+        let rel = hardware_path(host);
+        self.r.write(&self.plan.flake.join(&rel), out.as_bytes(), 0o644)?;
+        self.r.run(self.git().args(["add", "--", &rel]))?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ 4b. commit
+
+    /// One commit with everything the installer changed (before nixos-install,
+    /// so the installed system's flake revision is the pushed one).
+    fn commit(&mut self) -> Result<()> {
+        let host = self.host();
+        self.r.run(self.git().args(["add", "-A", "--", META_REL, &host_dir(host)]))?;
         // Nothing staged (a second run with the same choices): no commit needed.
         let clean = self.r.check(self.git().args(["diff", "--cached", "--quiet"]), false)?;
-        if !clean {
-            self.r.run(commit_cmd(&self.flake(), self.user(), &email))?;
+        if clean {
+            self.r.log("nothing new to commit");
+            return Ok(());
         }
+        let (name, email) = author(self.plan, self.meta_email.as_deref());
+        self.r.run(commit_cmd(&self.flake(), &name, &email, &commit_message(&self.plan.host)))?;
         Ok(())
     }
 
@@ -256,7 +347,7 @@ impl<'a> Run<'a> {
         if plan.home != HomePlan::Keep {
             // Destroys, formats and mounts every disk in disks.json at /mnt (no prompt: diskoScript skips it).
             let script = self.build(
-                &format!("nixosConfigurations.{}.config.system.build.diskoScript", plan.host),
+                &format!("nixosConfigurations.{}.config.system.build.diskoScript", self.host()),
                 "/nix/store/00000000000000000000000000000000-disko",
             )?;
             return self.r.run(Cmd::new(&script)).map(|_| ());
@@ -307,7 +398,7 @@ impl<'a> Run<'a> {
 
         if plan.data.iter().any(|d| matches!(d.mode, DataMode::Format { .. })) {
             let script = self.build(
-                &format!("nixosConfigurations.{}.config.system.build.diskoDataScript", plan.host),
+                &format!("nixosConfigurations.{}.config.system.build.diskoDataScript", self.host()),
                 "/nix/store/00000000000000000000000000000000-disko-data",
             )?;
             self.r.run(Cmd::new(&script))?;
@@ -413,7 +504,27 @@ impl<'a> Run<'a> {
     // ------------------------------------------------------------ 5. install
 
     fn install(&mut self) -> Result<()> {
-        self.r.run(install_cmd(&self.flake(), &self.plan.host)).map(|_| ())
+        self.r.run(install_cmd(&self.flake(), self.host())).map(|_| ())
+    }
+
+    // ------------------------------------------------------------ 5b. push
+
+    /// Push the install commit. Never fails the install: a failed push is a next step.
+    fn push(&mut self) -> Result<()> {
+        let Some((branch, shown)) = push_target(self.plan) else { return Ok(()) };
+        if self.r.exists(Path::new(SNAPSHOT_MARK), false) {
+            self.r.log("not pushing: the repo is the usb's copy with its own history");
+            self.push = PushState::NotPushed("the repo came from the usb, not github".into());
+            return Ok(());
+        }
+        match self.r.run(push_cmd(&self.flake(), &branch)) {
+            Ok(_) => self.push = PushState::Pushed(shown),
+            Err(e) => {
+                self.r.log(format!("push failed (the install is fine): {e:#}"));
+                self.push = PushState::Failed(first_line(&format!("{e:#}")));
+            }
+        }
+        Ok(())
     }
 
     // ------------------------------------------------------------ 6. repo
@@ -439,7 +550,21 @@ impl<'a> Run<'a> {
         }
         self.r.run(Cmd::new("cp").args(["-a", &self.flake()]).arg(dest.to_string_lossy()))?;
         self.r.write(&dest.join("HOST_AGE_KEY.txt"), format!("{}\n", self.age).as_bytes(), 0o644)?;
-        self.r.run(chown_cmd(self.plan, keep))?;
+        // Logged in to GitHub here: the new system is too (gh's hosts.yml only:
+        // home-manager may own config.yml).
+        let hosts = Path::new(GH_CONFIG).join("hosts.yml");
+        if self.plan.github.mode != GitHubMode::Offline && self.r.exists(&hosts, true) {
+            let gh_dir = home.join(".config/gh");
+            if !self.r.exists(&home.join(".config"), keep) {
+                self.r.mkdir(&home.join(".config"), 0o755)?;
+            }
+            if !self.r.exists(&gh_dir, keep) {
+                self.r.mkdir(&gh_dir, 0o700)?;
+            }
+            self.r.copy_file(&hosts, &gh_dir.join("hosts.yml"), 0o600)?;
+            self.gh_copied = true;
+        }
+        self.r.run(chown_cmd(self.plan, keep, self.gh_copied))?;
         Ok(())
     }
 
@@ -460,6 +585,11 @@ impl<'a> Run<'a> {
         if snapshot {
             self.r.log("note: ~/nixos is the usb's copy of the repo with its own history, not a clone of github");
         }
+        let push = match (&plan.github.mode, plan.github.push, &self.push) {
+            (GitHubMode::Offline, _, _) => PushState::Offline,
+            (_, false, _) => PushState::Off,
+            (_, true, p) => p.clone(),
+        };
         let input = NextInput {
             sb_carried: plan.carry.contains(&Carry::SecureBoot) && plan.previous.is_some(),
             setup_mode: !self.r.dry() && finish::setup_mode(),
@@ -468,14 +598,107 @@ impl<'a> Run<'a> {
             age: self.age.clone(),
             netbird_carried: plan.carry.contains(&Carry::NetBird) && plan.previous.is_some(),
             snapshot,
+            gh_copied: self.gh_copied,
+            fork: plan.github.is_fork(),
+            push: push.clone(),
+        };
+        let (pushed, not_pushed) = match &push {
+            PushState::Pushed(s) => (Some(s.clone()), None),
+            PushState::Offline => (None, Some("offline: committed in ~/nixos only".to_string())),
+            PushState::Off => (None, Some("you chose not to push".to_string())),
+            PushState::Failed(e) => (None, Some(format!("the push failed: {e}"))),
+            PushState::NotPushed(why) => (None, Some(why.clone())),
         };
         self.outcome = Some(Outcome {
             age_key: self.age.clone(),
             host_key_carried: self.host_key_carried,
             next_steps: finish::next_steps(&input),
+            pushed,
+            not_pushed,
         });
         Ok(())
     }
+}
+
+fn first_line(s: &str) -> String {
+    s.lines().next().unwrap_or(s).to_string()
+}
+
+/// What DryRun pretends nixos-generate-config printed.
+const FAKE_HARDWARE: &str = "# Do not modify this file!  It was generated by 'nixos-generate-config'
+{ config, lib, pkgs, modulesPath, ... }:
+{
+  imports = [ (modulesPath + \"/installer/scan/not-detected.nix\") ];
+  boot.initrd.availableKernelModules = [ \"nvme\" \"xhci_pci\" \"ahci\" \"usbhid\" ];
+  boot.kernelModules = [ \"kvm-amd\" ];
+  nixpkgs.hostPlatform = lib.mkDefault \"x86_64-linux\";
+  hardware.cpu.amd.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+}
+";
+
+/// Someone's install from their fork: what goes into meta.nix. None for the owner / offline.
+pub fn personal(plan: &Plan, meta: &str) -> Option<settings::Personal> {
+    let GitHubMode::Fork { url, .. } = &plan.github.mode else { return None };
+    let login = plan.github.login.clone().unwrap_or_default();
+    Some(settings::Personal {
+        full_name: plan.github.full_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| login.clone()),
+        email: plan
+            .github
+            .email
+            .clone()
+            .filter(|e| !e.is_empty())
+            .or_else(|| (!login.is_empty()).then(|| format!("{login}@users.noreply.github.com")))
+            .or_else(|| settings::get_string(meta, "email"))
+            .unwrap_or_default(),
+        ssh_keys: plan.github.keys.clone(),
+        repo_url: url.clone(),
+        github_user: login,
+    })
+}
+
+/// The commit's author: the GitHub name/email when known, else the username and meta.nix's email.
+pub fn author(plan: &Plan, meta_email: Option<&str>) -> (String, String) {
+    let g = &plan.github;
+    let name = g.full_name.clone().filter(|n| !n.is_empty()).or_else(|| g.login.clone()).unwrap_or_else(|| plan.settings.username.clone());
+    let email = g
+        .email
+        .clone()
+        .filter(|e| !e.is_empty())
+        .or_else(|| meta_email.map(str::to_string))
+        .unwrap_or_else(|| "vx-install@localhost".into());
+    (name, email)
+}
+
+pub fn commit_message(host: &HostPlan) -> String {
+    match host {
+        HostPlan::New(h) => format!("feat(hosts): add {}", h.name),
+        HostPlan::Existing(n) => format!("chore({n}): install settings"),
+    }
+}
+
+/// (branch, "owner/repo branch") the install commit goes to, None when it doesn't.
+pub fn push_target(plan: &Plan) -> Option<(String, String)> {
+    if !plan.github.pushes() {
+        return None;
+    }
+    match &plan.github.mode {
+        GitHubMode::Owner => Some(("main".into(), format!("{} main", plan.github.upstream))),
+        GitHubMode::Fork { url, branch } => {
+            let name = super::super::plan::parse_github_url(url).map(|(o, r)| format!("{o}/{r}")).unwrap_or_else(|| url.clone());
+            Some((branch.clone(), format!("{name} {branch}")))
+        }
+        GitHubMode::Offline => None,
+    }
+}
+
+/// `git push -u origin HEAD:<branch>`, with gh as the credential helper.
+pub fn push_cmd(repo: &str, branch: &str) -> Cmd {
+    github::git_env(Cmd::new("git").args(["-C", repo]).args(github::git_auth_args()).args([
+        "push",
+        "-u",
+        "origin",
+        &format!("HEAD:{branch}"),
+    ]))
 }
 
 // ---------------------------------------------------------------- pieces (pure, tested)
@@ -521,7 +744,7 @@ pub fn backup_cmd(fstype: &str, home: &Path, dest: &Path) -> Cmd {
         .arg(format!("{}/", dest.display()))
 }
 
-pub fn commit_cmd(repo: &str, user: &str, email: &str) -> Cmd {
+pub fn commit_cmd(repo: &str, user: &str, email: &str, msg: &str) -> Cmd {
     Cmd::new("git").args([
         "-C",
         repo,
@@ -534,7 +757,7 @@ pub fn commit_cmd(repo: &str, user: &str, email: &str) -> Cmd {
         "commit",
         "-q",
         "-m",
-        COMMIT_MSG,
+        msg,
     ])
 }
 
@@ -571,13 +794,16 @@ pub fn old_user(users: &[String], old_default: Option<&str>, new: &str) -> Optio
     old_default.filter(|d| users.iter().any(|u| u == d)).map(str::to_string)
 }
 
-/// One nixos-enter: the repo, the home folder and new data drives under it belong to the user.
-pub fn chown_cmd(plan: &Plan, keep: bool) -> Cmd {
+/// One nixos-enter: the repo, the home folder, gh's login and new data drives under it belong to the user.
+pub fn chown_cmd(plan: &Plan, keep: bool, gh: bool) -> Cmd {
     let u = &plan.settings.username;
     let home = format!("/home/{u}");
     let mut parts = vec![format!("chown -R {u}:users {}", shell_quote(&format!("{home}/nixos"))), format!("chown {u}:users {home}")];
     if !keep {
         parts.push(format!("chmod 700 {home}"));
+    }
+    if gh {
+        parts.push(format!("chown {u}:users {home}/.config {home}/.config/gh {home}/.config/gh/hosts.yml"));
     }
     for d in &plan.data {
         if matches!(d.mode, DataMode::Format { .. }) && d.mount.starts_with(&format!("{home}/")) {
@@ -605,6 +831,7 @@ pub fn stage_secure_boot_keys(r: &Runner, plan: &Plan) -> Result<()> {
 }
 
 /// Remove the key files under WORK. Best effort (also runs after a failure).
+/// gh's login stays until the end (a failed run may be retried).
 pub fn cleanup_secrets(r: &Runner) {
     let _ = r.remove(Path::new(DISK_KEY));
     let _ = r.remove(Path::new(DATA_KEYS));

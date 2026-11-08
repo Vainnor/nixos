@@ -540,7 +540,7 @@ pub fn rules_from(mounts: &[Mount], home: &Path, etc_clean: HashSet<PathBuf>) ->
 }
 
 pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
-    ctx.need(crate::ctx::Host::Arc)?;
+    ctx.need(crate::ctx::Host::NixOs)?;
     let mounts = mounts::read()?;
     let root = mounts.iter().rev().find(|m| m.mount_point == Path::new("/"));
     if root.is_none_or(|m| m.fstype != "tmpfs") {

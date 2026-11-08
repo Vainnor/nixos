@@ -1,8 +1,11 @@
 //! Plan building from screen state, the key flow, and render dumps of every
 //! screen (tools/vx/target/screens/<screen>-<size>.txt).
 
-use super::super::plan::{Carry, DataMode, HomePlan, Outcome, Previous, StepState, Unlocked, OLD_MOUNT, WORK_REPO};
-use super::app::{App, Field, HomeKind, Modal, Progress, Screen, TaskOut, Use};
+use super::super::engine::github::{Account, DeviceCode, Fork};
+use super::super::plan::{
+    Carry, DataMode, GitHubMode, Gpu, HomePlan, HostPlan, Outcome, Previous, Secret, StepState, Unlocked, OLD_MOUNT, WORK_REPO,
+};
+use super::app::{App, Field, GhOut, GhPhase, HomeKind, Modal, Progress, Screen, TaskOut, Use};
 use super::backend::Backend;
 use super::{demo, view};
 use ratatui::Terminal;
@@ -19,11 +22,51 @@ fn app() -> App {
     a
 }
 
-/// Past the welcome screen (repo prepared).
+fn owner() -> Account {
+    Account {
+        login: "Vainnor".into(),
+        name: Some("Vainnor".into()),
+        email: Some("vainnor@example.com".into()),
+        keys: vec!["ssh-ed25519 AAAAowner".into()],
+        owner: true,
+        fork: None,
+    }
+}
+
+fn someone(fork: bool) -> Account {
+    Account {
+        login: "someone".into(),
+        name: Some("Some One".into()),
+        email: None,
+        keys: vec!["ssh-ed25519 AAAAsomeone".into()],
+        owner: false,
+        fork: fork.then(|| Fork {
+            full_name: "someone/nixos".into(),
+            url: "https://github.com/someone/nixos.git".into(),
+            branch: "main".into(),
+        }),
+    }
+}
+
+fn logged_in(a: &mut App, acc: Account) {
+    a.apply(TaskOut::Gh(GhOut::Account(Ok(Box::new(acc))), vec!["$ gh api user".into()]));
+}
+
+fn prepared_repo() -> TaskOut {
+    TaskOut::Prepared(Ok((Box::new(demo::data()), PathBuf::from(WORK_REPO), None)), vec![])
+}
+
+/// Past welcome and github (logged in as the owner), repo prepared: on the machine step.
 fn prepared() -> App {
     let mut a = app();
-    a.apply(TaskOut::Prepared(Ok((Box::new(demo::data()), PathBuf::from(WORK_REPO), None))));
+    a.apply(TaskOut::Loaded(Ok(Box::new(demo::data()))));
+    logged_in(&mut a, owner());
+    a.apply(prepared_repo());
     a
+}
+
+fn code() -> DeviceCode {
+    DeviceCode { user_code: "WDJB-MJHT".into(), uri: "https://github.com/login/device".into(), device_code: Secret("x".into()), interval: 5, expires_in: 900 }
 }
 
 fn fake_unlocked(prev: &Previous) -> Unlocked {
@@ -71,9 +114,12 @@ fn passwords(a: &mut App) {
 #[test]
 fn defaults_from_the_probe() {
     let a = prepared();
-    assert_eq!(a.screen, Screen::Previous);
+    assert_eq!(a.screen, Screen::Machine);
     assert_eq!(a.system_disk().unwrap().path, "/dev/nvme0n1", "the previous install's disk");
-    assert_eq!(a.hostname.value, "arc");
+    assert_eq!(a.host_choice.as_deref(), Some("arc"), "a previous install: reinstall arc");
+    assert_eq!(a.host_name(), "arc");
+    assert_eq!(a.new_gpu, Gpu::Amd, "lspci's answer");
+    assert!(a.new_aspects.contains("desktop") && !a.new_aspects.contains("gaming") && !a.new_aspects.contains("base"));
     assert_eq!(a.data.as_ref().unwrap().wallpapers[a.wallpaper_idx].name, "eye");
     assert!(a.fetch_latest);
     let c = idx(&a, "/dev/nvme1n1");
@@ -223,8 +269,27 @@ fn walk_the_screens_with_keys() {
     assert!(!a.fetch_latest);
     key(&mut a, KeyCode::Down);
     assert_eq!(a.focus, Some(Field::Start));
-    // (prepare runs on a thread; apply its result directly)
-    a.apply(TaskOut::Prepared(Ok((Box::new(demo::data()), PathBuf::from(WORK_REPO), None))));
+    // (tasks run on threads; apply their results directly)
+    a.apply(TaskOut::Loaded(Ok(Box::new(demo::data()))));
+    assert_eq!(a.screen, Screen::GitHub);
+    assert_eq!(a.focus, Some(Field::GhLogin));
+    // [ next ] isn't there before logging in, and skipping is refused while github is reachable.
+    assert!(a.check(Screen::GitHub).unwrap_err().contains("log in"));
+    a.focus = Some(Field::GhSkip);
+    key(&mut a, KeyCode::Enter);
+    assert_eq!(a.screen, Screen::GitHub);
+    a.apply(TaskOut::Gh(GhOut::Code(Ok(code())), vec![]));
+    assert!(matches!(a.gh.phase, GhPhase::Code(_)));
+    a.gh_cancel();
+    logged_in(&mut a, owner());
+    a.fix_focus();
+    assert_eq!(a.focus, Some(Field::GhPush));
+    key(&mut a, KeyCode::Down);
+    assert_eq!(a.focus, Some(Field::Next));
+    a.apply(prepared_repo());
+    assert_eq!(a.screen, Screen::Machine);
+    a.focus = Some(Field::Next);
+    key(&mut a, KeyCode::Enter);
     assert_eq!(a.screen, Screen::Previous);
     // skip the previous install
     a.focus = Some(Field::SkipPrevious);
@@ -237,6 +302,93 @@ fn walk_the_screens_with_keys() {
     // esc goes back
     key(&mut a, KeyCode::Esc);
     assert_eq!(a.screen, Screen::Previous);
+    key(&mut a, KeyCode::Esc);
+    assert_eq!(a.screen, Screen::Machine);
+    key(&mut a, KeyCode::Esc);
+    assert_eq!(a.screen, Screen::GitHub);
+}
+
+#[test]
+fn new_machine_plan() {
+    let mut a = prepared();
+    a.skipped_previous = true;
+    passwords(&mut a);
+    a.focus = Some(Field::NewHost);
+    key(&mut a, KeyCode::Enter);
+    assert_eq!(a.host_choice, None);
+    assert_eq!(a.focus, Some(Field::HostName), "typing the name next");
+    assert!(a.build_plan().unwrap_err().contains("name"), "no name yet");
+    typ(&mut a, "arc");
+    assert!(a.build_plan().unwrap_err().contains("already in the repo"));
+    a.new_name.value = "mac".into();
+    assert!(a.build_plan().unwrap_err().contains("taken"));
+    a.new_name.value = "forge".into();
+    // gaming on, gpu to nvidia.
+    let gaming = a.data.as_ref().unwrap().aspects.iter().position(|x| x.name == "gaming").unwrap();
+    a.focus = Some(Field::Aspect(gaming));
+    key(&mut a, KeyCode::Char(' '));
+    a.focus = Some(Field::Gpu);
+    key(&mut a, KeyCode::Right);
+    let p = a.build_plan().unwrap();
+    let HostPlan::New(h) = &p.host else { panic!("{:?}", p.host) };
+    assert_eq!(h.name, "forge");
+    assert_eq!(h.aspects, ["base", "desktop", "dev", "privacy", "gaming"]);
+    assert_eq!(h.gpu, Gpu::Nvidia);
+    assert_eq!(h.state_version, "26.11");
+    assert_eq!(p.settings.hostname, "forge", "the hostname is the machine's name");
+    // Back to arc.
+    a.host_choice = Some("arc".into());
+    let p = a.build_plan().unwrap();
+    assert_eq!(p.host, HostPlan::Existing("arc".into()));
+    assert_eq!(p.settings.hostname, "arc");
+}
+
+#[test]
+fn github_plans() {
+    let mut a = prepared();
+    a.skipped_previous = true;
+    passwords(&mut a);
+    let g = a.build_plan().unwrap().github;
+    assert_eq!((g.mode.clone(), g.push, g.login.as_deref()), (GitHubMode::Owner, true, Some("Vainnor")));
+    assert_eq!(g.upstream, "vainnor/nixos");
+    assert_eq!(g.email.as_deref(), Some("vainnor@example.com"));
+    a.gh.push = false;
+    assert!(!a.build_plan().unwrap().github.pushes(), "the owner can choose not to push");
+
+    // Someone without a fork can't go on.
+    logged_in(&mut a, someone(false));
+    assert!(a.check(Screen::GitHub).unwrap_err().contains("no fork"));
+    assert!(a.build_plan().is_err());
+    // Forked: cloned from and pushed to the fork, always.
+    a.apply(TaskOut::Gh(GhOut::Forked(Ok(someone(true).fork.unwrap())), vec![]));
+    assert!(a.check(Screen::GitHub).is_ok());
+    assert_eq!(a.origin(), "https://github.com/someone/nixos.git");
+    assert!(a.forking());
+    // No email on the profile: asked on the options screen.
+    a.email.value.clear();
+    assert!(a.build_plan().unwrap_err().contains("email"));
+    a.email.value = "someone@example.com".into();
+    let g = a.build_plan().unwrap().github;
+    assert_eq!(g.mode, GitHubMode::Fork { url: "https://github.com/someone/nixos.git".into(), branch: "main".into() });
+    assert!(g.push);
+    assert_eq!((g.full_name.as_deref(), g.email.as_deref()), (Some("Some One"), Some("someone@example.com")));
+    assert_eq!(g.keys, ["ssh-ed25519 AAAAsomeone"]);
+
+    // Offline (no network): no github step at all.
+    let mut b = App::new(Backend::Demo, true, None, None, false);
+    b.write_log = false;
+    b.apply(TaskOut::Probed(Box::new(demo::machine()), Ok(demo::disks())));
+    assert!(!b.uses_github());
+    assert!(!b.order().contains(&Screen::GitHub));
+    // GitHub unreachable: skipping becomes possible.
+    let mut c = app();
+    c.apply(TaskOut::Loaded(Ok(Box::new(demo::data()))));
+    c.apply(TaskOut::Gh(GhOut::Code(Err("couldn't reach github: timeout".into())), vec![]));
+    assert!(c.gh.unreachable);
+    c.focus = Some(Field::GhSkip);
+    key(&mut c, KeyCode::Enter);
+    assert!(c.gh.skipped);
+    assert_eq!(c.github_plan().mode, GitHubMode::Offline);
 }
 
 #[test]
@@ -262,6 +414,8 @@ fn install_end_to_end_with_the_dry_run_engine() {
     assert_eq!(a.screen, Screen::Summary, "error: {:?}\n{}", p.error, p.log.join("\n"));
     assert!(p.steps.iter().all(|s| matches!(s.1, Some(StepState::Done | StepState::Skipped))), "{:?}", p.steps);
     assert!(p.log.iter().any(|l| l.starts_with("$ ")), "commands are logged");
+    assert_eq!(p.log[0], "$ gh api user", "github's commands go first");
+    assert!(p.log.iter().any(|l| l.contains(" push -u origin HEAD:main")));
     let all = p.log.join("\n");
     let leak: Vec<&str> = all.lines().filter(|l| l.contains("old-pass") || l.contains("s3cr3t-pw")).collect();
     assert!(leak.is_empty(), "no passwords in the log: {leak:?}");
@@ -356,6 +510,33 @@ fn render_every_screen() {
     let mut a = app();
     dump("welcome", &mut a);
 
+    // GitHub: log in, the code, the owner, someone without and with a fork.
+    let mut a = app();
+    a.apply(TaskOut::Loaded(Ok(Box::new(demo::data()))));
+    dump("github-login", &mut a);
+    a.apply(TaskOut::Gh(GhOut::Code(Err("couldn't reach github: curl: (6) could not resolve host: github.com".into())), vec![]));
+    a.focus = Some(Field::GhSkip);
+    dump("github-unreachable", &mut a);
+    a.gh.phase = GhPhase::Code(code());
+    a.focus = Some(Field::GhCancel);
+    dump("github-code", &mut a);
+    logged_in(&mut a, owner());
+    a.focus = Some(Field::GhPush);
+    dump("github-owner", &mut a);
+    logged_in(&mut a, someone(false));
+    a.focus = Some(Field::GhFork);
+    dump("github-no-fork", &mut a);
+    logged_in(&mut a, someone(true));
+    dump("github-fork", &mut a);
+
+    // Machine: reinstall arc, or a new one.
+    let mut a = prepared();
+    dump("machine-reinstall", &mut a);
+    a.host_choice = None;
+    a.new_name.value = "forge".into();
+    a.focus = Some(Field::HostName);
+    dump("machine-new", &mut a);
+
     let mut a = prepared();
     a.focus = Some(Field::UnlockPassword);
     a.unlock_pw.value = "hunter2".into();
@@ -427,6 +608,22 @@ fn render_every_screen() {
     a.focus = Some(Field::Install);
     dump("review-keep", &mut a);
 
+    // A new machine from someone's fork.
+    let mut a = prepared();
+    a.skipped_previous = true;
+    passwords(&mut a);
+    logged_in(&mut a, someone(true));
+    a.email.value = "someone@example.com".into();
+    a.host_choice = None;
+    a.new_name.value = "forge".into();
+    a.select_system(idx(&a, "/dev/sdc"));
+    a.go(Screen::Options);
+    a.focus = Some(Field::Email);
+    dump("options-fork", &mut a);
+    a.go(Screen::Review);
+    a.focus = Some(Field::ConfirmYes);
+    dump("review-new-fork", &mut a);
+
     // Progress, summary, failure.
     let mut a = unlocked();
     passwords(&mut a);
@@ -453,12 +650,18 @@ fn render_every_screen() {
             "remove the usb stick and reboot; if windows starts, pick the nixos drive with f11.".into(),
             "secure boot: in the bios, reset to setup mode, boot nixos once so it enrolls its keys, then turn secure boot on.".into(),
             "secrets: on the mac run  vx secrets add-host <the age key above>, push, then  vx switch  here.".into(),
-            "github: gh auth login (so git push works)".into(),
         ],
+        pushed: Some("vainnor/nixos main".into()),
+        not_pushed: None,
     });
     a.screen = Screen::Summary;
     a.focus = None;
     dump("summary", &mut a);
+    let o = a.progress.as_mut().unwrap().outcome.as_mut().unwrap();
+    o.pushed = None;
+    o.not_pushed = Some("the push failed: ! [rejected] HEAD -> main (fetch first)".into());
+    o.next_steps.push("push later: cd ~/nixos && git push".into());
+    dump("summary-not-pushed", &mut a);
 
     let p = a.progress.as_mut().unwrap();
     p.outcome = None;

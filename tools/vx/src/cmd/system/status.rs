@@ -52,7 +52,7 @@ const T: Duration = Duration::from_millis(1500);
 
 pub fn run(ctx: &Ctx) -> Result<()> {
     let start = Instant::now();
-    let arc = ctx.is_arc();
+    let arc = ctx.is_nixos();
     type Check<'a> = Box<dyn Fn(&Ctx) -> Vec<Line> + Send + Sync + 'a>;
     let mut checks: Vec<Check> = vec![Box::new(host), Box::new(generation), Box::new(repo), Box::new(inputs)];
     if arc {
@@ -86,7 +86,7 @@ fn probe(c: &mut Command) -> Option<String> {
 fn host(ctx: &Ctx) -> Vec<Line> {
     let name = probe(&mut Command::new("hostname")).unwrap_or_else(|| "?".into());
     let os = match ctx.host {
-        Host::Arc => std::fs::read_to_string("/run/current-system/nixos-version")
+        Host::NixOs => std::fs::read_to_string("/run/current-system/nixos-version")
             .map(|v| format!("nixos {}", v.trim()))
             .unwrap_or_else(|_| "linux".into()),
         Host::Mac => probe(Command::new("sw_vers").arg("-productVersion"))
@@ -101,7 +101,7 @@ fn generation(ctx: &Ctx) -> Vec<Line> {
     let Ok(target) = std::fs::read_link(prof) else {
         return vec![warn(match ctx.host {
             Host::Mac => "no system generation: nix-darwin isn't active (first time: see README \"The Mac\")",
-            Host::Arc => "no system profile at /nix/var/nix/profiles/system",
+            Host::NixOs => "no system profile at /nix/var/nix/profiles/system",
         })];
     };
     let gen_no = Regex::new(r"system-(\d+)-link")
@@ -116,7 +116,7 @@ fn generation(ctx: &Ctx) -> Vec<Line> {
     let mut lines = vec![];
     if current.is_some() && current != default {
         lines.push(warn(format!("generation {gen_no}{age} is the default, but something else is running (vx test?); next boot uses {gen_no}")));
-    } else if ctx.is_arc() {
+    } else if ctx.is_nixos() {
         let booted = canon("/run/booted-system");
         if booted == current {
             lines.push(ok(format!("generation {gen_no}{age}, booted = current")));

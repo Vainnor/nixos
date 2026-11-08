@@ -32,6 +32,10 @@ pub struct InstallArgs {
     /// Don't offer to fetch the latest repo from GitHub; install the copy on the ISO
     #[arg(long)]
     pub offline: bool,
+
+    /// With --demo: the GitHub login to pretend to be (the owner "Vainnor", or anyone else to see the fork path)
+    #[arg(long, hide = true, value_name = "LOGIN")]
+    pub demo_user: Option<String>,
 }
 
 /// `repo`: the global --repo, used to build install-data when neither

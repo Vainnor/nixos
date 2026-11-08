@@ -1,5 +1,21 @@
 //! The summary's next steps, and small helpers (dates, firmware state).
 
+/// What happened to the install commit.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum PushState {
+    /// No GitHub (offline, or skipped): committed locally only.
+    #[default]
+    Offline,
+    /// The owner turned pushing off.
+    Off,
+    /// Pushed to "owner/repo branch".
+    Pushed(String),
+    /// Tried and failed (the reason).
+    Failed(String),
+    /// Not tried (the reason), e.g. the repo is the usb's copy.
+    NotPushed(String),
+}
+
 /// What the next steps depend on.
 #[derive(Clone, Debug, Default)]
 pub struct NextInput {
@@ -15,6 +31,11 @@ pub struct NextInput {
     pub netbird_carried: bool,
     /// ~/nixos is a snapshot of the usb's copy, with its own history.
     pub snapshot: bool,
+    /// gh's login was copied into the new home.
+    pub gh_copied: bool,
+    /// Installed from the user's fork (their own secrets, not the owner's).
+    pub fork: bool,
+    pub push: PushState,
 }
 
 pub fn next_steps(i: &NextInput) -> Vec<String> {
@@ -31,13 +52,21 @@ pub fn next_steps(i: &NextInput) -> Vec<String> {
     if i.tpm {
         v.push("the disk unlocks itself once secure boot is on".into());
     }
-    if i.host_key_new {
+    if i.fork {
+        v.push(
+            "secrets are off (secretsReady = false): your fork can't read the owner's secrets.yaml. \
+             make your own with sops when you need them"
+                .into(),
+        );
+    } else if i.host_key_new {
         v.push(format!("on the mac: vx secrets add-host {}, push, then vx switch on the pc", i.age));
     }
     if !i.netbird_carried {
         v.push("sudo netbird up".into());
     }
-    v.push("gh auth login".into());
+    if !i.gh_copied {
+        v.push("gh auth login".into());
+    }
     if i.snapshot {
         v.push(
             "~/nixos is the usb's copy with its own history: git fetch origin, then rebase the install settings \
@@ -45,7 +74,13 @@ pub fn next_steps(i: &NextInput) -> Vec<String> {
                 .into(),
         );
     }
-    v.push("commit and push ~/nixos (install settings commit)".into());
+    match &i.push {
+        PushState::Pushed(_) => {}
+        PushState::Offline => v.push("push later with vx sync: the install commit is only in ~/nixos".into()),
+        PushState::Off => v.push("push when ready: cd ~/nixos && git push".into()),
+        PushState::Failed(_) | PushState::NotPushed(_) if i.snapshot => {}
+        PushState::Failed(_) | PushState::NotPushed(_) => v.push("push later: cd ~/nixos && git push".into()),
+    }
     v
 }
 
@@ -96,7 +131,18 @@ mod tests {
         assert!(v.contains(&"on the mac: vx secrets add-host age1xyz, push, then vx switch on the pc".to_string()));
         assert!(v.contains(&"sudo netbird up".to_string()));
         assert!(v.contains(&"gh auth login".to_string()));
-        assert_eq!(v.last().unwrap(), "commit and push ~/nixos (install settings commit)");
+        assert_eq!(v.last().unwrap(), "push later with vx sync: the install commit is only in ~/nixos");
+    }
+
+    #[test]
+    fn pushed_and_logged_in() {
+        let v = next_steps(&NextInput { gh_copied: true, push: PushState::Pushed("vainnor/nixos main".into()), ..Default::default() });
+        assert!(!v.iter().any(|s| s.contains("gh auth") || s.contains("push")), "{v:?}");
+        let v = next_steps(&NextInput { push: PushState::Failed("rejected".into()), ..Default::default() });
+        assert_eq!(v.last().unwrap(), "push later: cd ~/nixos && git push");
+        let v = next_steps(&NextInput { fork: true, host_key_new: true, age: "age1x".into(), ..Default::default() });
+        assert!(v.iter().any(|s| s.starts_with("secrets are off")));
+        assert!(!v.iter().any(|s| s.contains("add-host")), "no owner secrets for a fork");
     }
 
     #[test]

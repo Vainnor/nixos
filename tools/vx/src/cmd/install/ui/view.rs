@@ -48,12 +48,13 @@ pub fn draw(f: &mut Frame, app: &App) {
 fn header(f: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let cur = app.screen.step();
+    let used: Vec<usize> = app.order().iter().map(|s| s.step()).collect();
     let mut spans = vec![];
     for (i, name) in STEPS.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled(" · ", t.muted()));
         }
-        let skipped = i == 1 && app.previous.is_none();
+        let skipped = i < STEPS.len() - 1 && !used.contains(&i);
         spans.push(if i == cur {
             Span::styled(format!(" {name} "), t.selected())
         } else if i < cur && !skipped {
@@ -90,6 +91,7 @@ fn help_text(app: &App) -> String {
         Screen::Summary | Screen::Failed => format!("{up} move · enter select · q quit"),
         _ if app.focus.is_some_and(|f| f.is_input()) => format!("type · enter next · {up}/tab move · ctrl+u clear · esc back"),
         Screen::Welcome => format!("{up} move · space toggle · enter select · q quit"),
+        Screen::GitHub => format!("{up} move · enter select · esc back · q quit"),
         _ => format!("{up} move · space toggle · {lr} change · enter select · esc back · q quit"),
     }
 }

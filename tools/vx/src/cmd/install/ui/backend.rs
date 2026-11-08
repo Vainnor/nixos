@@ -2,12 +2,14 @@
 //! always does the work (`--demo` and `--dry-run` use its DryRun mode); the
 //! demo only fakes what a Mac can't provide: disks, the machine, install data.
 
+use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::engine::{self, Mode};
 use super::super::plan::{DiskInfo, Event, InstallData, Machine, Plan, Previous, Secret, Unlocked};
 use super::super::probe::{self, BackupTarget};
 use super::demo;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,11 +67,30 @@ impl Backend {
         }
     }
 
-    pub fn prepare_repo(self, data: &InstallData, update: bool) -> Result<PathBuf> {
-        match self {
-            Backend::Demo => demo::prepare_repo(update),
-            Backend::Engine(m) => engine::prepare_repo(data, update, m),
+    /// The work repo from `origin` (clone) or the usb, and the commands run.
+    pub fn prepare_repo(self, data: &InstallData, update: bool, origin: &str) -> (Result<PathBuf>, Vec<String>) {
+        if self.is_demo() {
+            demo::pause(if update { 1400 } else { 500 });
         }
+        engine::prepare_repo(data, update, origin, self.mode())
+    }
+
+    // GitHub: the demo and --dry-run pretend (engine DryRun fakes the answers).
+
+    pub fn gh_device_code(self) -> (Result<DeviceCode>, Vec<String>) {
+        engine::gh_device_code(self.mode())
+    }
+
+    pub fn gh_login(self, dc: &DeviceCode, cancel: &AtomicBool) -> (Result<()>, Vec<String>) {
+        engine::gh_login(dc, cancel, self.mode())
+    }
+
+    pub fn gh_account(self, owner: &str, repo: &str) -> (Result<Account>, Vec<String>) {
+        engine::gh_account(owner, repo, self.mode())
+    }
+
+    pub fn gh_fork(self, owner: &str, repo: &str, login: &str) -> (Result<Fork>, Vec<String>) {
+        engine::gh_fork(owner, repo, login, self.mode())
     }
 
     pub fn unlock(self, prev: &Previous, password: Option<&Secret>) -> Result<Unlocked> {

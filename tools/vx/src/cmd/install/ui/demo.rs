@@ -1,24 +1,24 @@
 //! `--demo`: a fake machine and disks resembling the real PC and fake install
-//! data. Unlocking and installing go through the engine's DryRun (it only
-//! logs commands), so nothing is read from or written to any disk.
+//! data. Unlocking, GitHub and installing go through the engine's DryRun (it
+//! only logs commands, with made-up answers), so nothing is read from or
+//! written to any disk or GitHub. `--demo-user <login>` picks who logs in:
+//! the owner (Vainnor, the default) or someone who has to fork first.
 
-use super::super::plan::{DiskInfo, DiskKind, InstallData, Machine, PartInfo, Settings, WallpaperInfo, WORK_REPO};
+use super::super::plan::{AspectInfo, DiskInfo, DiskKind, Gpu, HostInfo, InstallData, Machine, PartInfo, Settings, WallpaperInfo};
 use super::super::probe::{self, BackupTarget};
-use anyhow::Result;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
 /// Shorter waits in tests.
-fn pause(ms: u64) {
+pub fn pause(ms: u64) {
     if !cfg!(test) {
         sleep(Duration::from_millis(ms));
     }
 }
 
 pub fn machine() -> Machine {
-    Machine { root: true, uefi: true, online: true, secure_boot: false, setup_mode: true, tpm: true, ram_gb: 64 }
+    Machine { root: true, uefi: true, online: true, secure_boot: false, setup_mode: true, tpm: true, ram_gb: 64, gpu: Gpu::Amd }
 }
 
 fn part(path: &str, fstype: Option<&str>, size: u64, label: Option<&str>, partlabel: Option<&str>, uuid: Option<&str>) -> PartInfo {
@@ -195,12 +195,25 @@ pub fn data() -> InstallData {
             ),
         ],
         themes: vec!["vainnor-slate".into(), "caelus".into()],
+        owner: "vainnor".into(),
+        repo: "nixos".into(),
+        hosts: vec![HostInfo {
+            name: "arc".into(),
+            aspects: ["base", "desktop", "gaming", "dev", "privacy", "streaming", "vm"].map(String::from).to_vec(),
+            gpu: Gpu::Amd,
+        }],
+        aspects: [
+            ("desktop", "mango wayland desktop, apps, theming", true),
+            ("dev", "editors, languages, containers", true),
+            ("privacy", "firewall, encrypted dns, hardened browser", true),
+            ("gaming", "steam, proton, gamemode", false),
+            ("streaming", "obs, instant replay", false),
+            ("vm", "libvirt, windows vm, gpu passthrough", false),
+        ]
+        .map(|(n, d, on)| AspectInfo { name: n.into(), description: d.into(), default: on })
+        .to_vec(),
+        state_version: "26.11".into(),
     }
-}
-
-pub fn prepare_repo(update: bool) -> Result<PathBuf> {
-    pause(if update { 1400 } else { 500 });
-    Ok(PathBuf::from(WORK_REPO))
 }
 
 pub fn backup_targets(disks: &[DiskInfo], erased: &[String]) -> Vec<BackupTarget> {

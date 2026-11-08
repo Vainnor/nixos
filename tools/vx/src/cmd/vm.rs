@@ -149,7 +149,7 @@ impl Which {
 }
 
 pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     match cmd {
         Cmd::Vm { cmd } => match cmd {
             VmCmd::Status => status(ctx),

@@ -37,6 +37,8 @@ pub fn run(args: InstallArgs, repo: Option<std::path::PathBuf>) -> Result<()> {
     } else {
         Backend::Engine(Mode::Real)
     };
+    // The demo and --dry-run pretend to log in to GitHub as this login.
+    super::engine::github::set_demo_login(args.demo_user.as_deref().unwrap_or("Vainnor"));
     let ansi = theme::console_is_ansi();
     let mut app = App::new(backend, args.offline, args.data.clone(), repo, ansi);
     // Colours early, from install-data when it's a file (on the ISO it is).

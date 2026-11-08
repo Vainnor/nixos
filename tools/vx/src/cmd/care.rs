@@ -94,20 +94,20 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
     match cmd {
         Cmd::Secrets(c) => secrets::run(ctx, c),
         Cmd::Snapshots => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             ctx.run(
                 ctx.sudo("btrbk")
                     .args(["-c", "/etc/btrbk/local.conf", "list", "snapshots"]),
             )
         }
         Cmd::Snapshot => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             ctx.run(ctx.sudo("systemctl").args(["start", "btrbk-local"]))?;
             ui::ok("snapshot taken; see them with: vx snapshots");
             Ok(())
         }
         Cmd::Backup => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             if !crate::ctx::has("restic-homelab") {
                 bail!("restic isn't set up; fill restic/* in the secrets and set meta.resticReady = true");
             }
@@ -117,7 +117,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::Restore(a) => restore::run(ctx, a),
         Cmd::PersistCheck(a) => persist::run(ctx, a),
         Cmd::Fans { cmd: None } => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             ctx.run(&mut ctx.cmd("sensors"))
         }
         Cmd::Fans {
@@ -125,14 +125,14 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         } => fans_save(ctx),
         Cmd::Sudo(SudoCmd::Unlock { minutes }) => sudo_unlock(ctx, minutes),
         Cmd::Sudo(SudoCmd::Lock) => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             ctx.run(ctx.sudo("rm").args(["-f", UNLOCK_FILE]))?;
             ctx.probe(ctx.sudo("systemctl").args(["stop", "sudo-relock.timer"]));
             ui::ok("sudo asks for a password again");
             Ok(())
         }
         Cmd::Secureboot => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             ctx.run(ctx.sudo("sbctl").arg("status"))?;
             let out = ctx.probe(ctx.cmd("bootctl").arg("status")).unwrap_or_default();
             for l in out.lines().filter(|l| {
@@ -144,7 +144,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
             Ok(())
         }
         Cmd::Tpm(TpmCmd::Enroll) => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             let out = ctx.probe(ctx.cmd("bootctl").arg("status")).unwrap_or_default();
             if !secure_boot_on(&out) {
                 bail!("turn Secure Boot on first (vx secureboot)");
@@ -157,7 +157,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
             ]))
         }
         Cmd::Usb { cmd } => {
-            ctx.need(Host::Arc)?;
+            ctx.need(Host::NixOs)?;
             match cmd {
                 None => ctx.run(ctx.cmd("usbguard").arg("list-devices")),
                 Some(UsbCmd::Allow { id }) => {
@@ -174,7 +174,7 @@ pub fn secure_boot_on(bootctl: &str) -> bool {
 }
 
 fn fans_save(ctx: &Ctx) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let repo = ctx.repo()?;
     if ctx.probe(ctx.sudo("test").args(["-f", COOLERCONTROL])).is_none() {
         bail!("no CoolerControl config yet; set up a curve in the app first");
@@ -189,7 +189,7 @@ fn fans_save(ctx: &Ctx) -> Result<()> {
 }
 
 fn sudo_unlock(ctx: &Ctx, minutes: u32) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let user = std::env::var("USER").context("USER is not set")?;
     let new = format!("{UNLOCK_FILE}.new");
 
