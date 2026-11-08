@@ -20,7 +20,12 @@
   };
 
   flake.modules.homeManager.desktop =
-    { lib, osConfig, ... }:
+    {
+      config,
+      lib,
+      osConfig,
+      ...
+    }:
     let
       primary = osConfig.vx.host.primaryMonitor;
       tags = lib.range 1 9;
@@ -38,6 +43,16 @@
     in
     {
       imports = [ inputs.mango.hmModules.mango ];
+
+      # A switch writes a new config.conf, but a running mango keeps the old
+      # one (new key bindings did nothing until a re-login): reload every
+      # running mango of this user over its socket.
+      xdg.configFile."mango/config.conf".onChange = ''
+        for sock in /run/user/$(id -u)/mango-*.sock; do
+          [ -S "$sock" ] || continue
+          MANGO_INSTANCE_SIGNATURE="$sock" ${config.wayland.windowManager.mango.package}/bin/mmsg dispatch reload_config >/dev/null 2>&1 || true
+        done
+      '';
 
       wayland.windowManager.mango = {
         enable = true;
