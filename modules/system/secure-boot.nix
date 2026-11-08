@@ -1,21 +1,35 @@
 # Secure Boot with lanzaboote, and TPM2 unlock of the encrypted disk.
 #
 # Flow (see README "Secure Boot + TPM"):
-#   1. Install (`vx install`) with Secure Boot OFF. The boot files are
-#      installed unsigned. First boot generates your own keys (/var/lib/sbctl,
-#      persisted), signs the boot files and prepares enrollment.
-#   2. In the BIOS, put Secure Boot into Setup Mode (clear/delete keys), reboot.
-#      systemd-boot enrolls your keys + Microsoft's (Windows and graphics
-#      card option ROMs need them). Then turn Secure Boot ON in the BIOS.
+#   1. Before installing, put Secure Boot into Setup Mode in the BIOS
+#      (clear/delete the keys). The installer sees Setup Mode, makes your own
+#      keys (sbctl, /var/lib/sbctl, persisted), enrolls them plus Microsoft's
+#      (Windows and graphics card option ROMs need them) and signs the boot
+#      files at install time.
+#   2. After the install, turn Secure Boot ON in the BIOS. That's the only
+#      manual step.
 #   3. The first boot with Secure Boot on enrolls the TPM by itself
 #      (tpm-first-boot-enroll below, when the installer chose TPM unlock): the
 #      disk then unlocks itself as long as Secure Boot state (PCR 7) is
 #      unchanged. Your passphrase keeps working as a fallback.
 #      `vx tpm enroll` does the same by hand (asks for the passphrase).
 #
-# Secure Boot keys carried over by the installer and still enrolled in the
-# firmware: the boot files are signed at install time, so just turn Secure
-# Boot on in the BIOS (no Setup Mode); step 3 follows by itself.
+# Keys carried over from a previous install and still enrolled: the same,
+# minus the enrolment (signed at install time; just turn Secure Boot on).
+#
+# Firmware NOT in Setup Mode while installing (fallback, lanzaboote's own
+# flow): the boot files are installed unsigned; the first boot makes the keys
+# (generate-sb-keys), puts them on the ESP for enrolment and signs
+# (prepare-sb-auto-enroll). Then put Secure Boot into Setup Mode and reboot:
+# systemd-boot enrolls them; then turn Secure Boot on.
+#
+# With keys already made and enrolled (steps 1-2), the lanzaboote units are
+# harmless: generate-sb-keys is skipped (ConditionPathExists=!keys);
+# prepare-sb-auto-enroll runs once, exports the same keys as .auth files to
+# the ESP (`sbctl enroll-keys --export auth` writes no EFI variables and works
+# outside Setup Mode) and re-signs, then never again (its condition is the
+# files on the ESP). systemd-boot only enrolls them if the firmware is ever
+# back in Setup Mode (e.g. a BIOS reset), which restores your own keys.
 #
 # The tpm2-device=auto crypttab option on cryptroot lives in hosts/_disko.nix
 # (only when the disk is encrypted).

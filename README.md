@@ -100,8 +100,9 @@ Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 or `nix build .#nixosConfigurations.installer.config.system.build.isoImage`. Write it to a stick with
 `vx iso --flash /dev/sdX` (or any image writer). Any other NixOS ISO works too, see the end of this section.
 
-**2. BIOS.** Boot in UEFI mode. Turn Secure Boot **off**, only so the installer USB boots; it gets turned on
-again after the install (see Secure Boot + TPM below). In Windows, turn off Fast Startup first.
+**2. BIOS.** Boot in UEFI mode. Turn Secure Boot **off**, only so the installer USB boots, and put it into
+**Setup Mode**: *Security > Secure Boot*, mode **Custom**, **delete all keys**. The installer then enrolls
+your own keys itself (see Secure Boot + TPM below). In Windows, turn off Fast Startup first.
 
 **3. Boot the stick.** The installer starts by itself, full screen. Plug in Ethernet before it starts; for
 Wi-Fi, quit it, run `nmtui`, then `vx-installer` to start it again. If the graphics don't come up it runs on
@@ -110,6 +111,8 @@ the plain console instead. Nothing is erased until the review screen.
 The screens:
 - **welcome**: checks root, UEFI, network, Secure Boot / Setup Mode and the TPM, and offers to fetch the
   latest repo from GitHub (default) or install the copy on the stick.
+- **netbird**: log in to NetBird (a link/code, or a setup key) so the machine is on the mesh from its first
+  boot, under its own name. Skipped when the login is carried over.
 - **machine**: reinstall a machine that's already in the repo (arc), or set up a **new machine** (see
   [Another PC](#another-pc)).
 - **previous install**: if a disk holds a NixOS install made by this flake, unlock it with its disk password
@@ -126,7 +129,8 @@ The screens:
   zone, theme and wallpaper.
 - **passwords**: the disk passphrase and your login password (or the carried-over one).
 - **review**: everything you picked, with what will be **erased** in red. Type `YES`.
-- **progress**: each step with a live log, then a summary with what to do next, and reboot or a shell.
+- **progress**: each step with a live log (with Setup Mode: your Secure Boot keys are made and enrolled,
+  plus Microsoft's, and the boot files signed), then a summary with what to do next, and reboot or a shell.
 
 **Carry-over** copies state from the previous install's `/persistent`, so the new system starts where the
 old one left off. Each item can be left out:
@@ -144,9 +148,22 @@ to GitHub (you log in with a code on your phone). Without a network to GitHub it
 with `vx sync`, because a clone without `disks.json` builds the default layout (one encrypted disk, no data
 drives), not yours.
 
-**5. First boot.** Pick the NixOS drive with F11 if Windows starts. Type the disk passphrase. On this first
-boot your own Secure Boot keys are created (unless they were carried over) and the boot files are signed.
-Log in, then run `sudo netbird up` (skip it if the login was carried over). For secrets, see below.
+**5. After the installer.** All that's left by hand:
+1. **Remove the USB stick** and reboot.
+2. In the BIOS, turn **Secure Boot on**. Pick the NixOS drive with F11 if Windows starts, and type the disk
+   passphrase.
+
+The rest happens by itself:
+- **Secure Boot**: your keys were enrolled during the install (firmware in Setup Mode), so it just works.
+  Not in Setup Mode? See [Secure Boot + TPM](#after-installing-once).
+- **TPM**: that first boot with Secure Boot on enrolls the TPM (if you chose TPM unlock); from then on the
+  disk unlocks without the passphrase.
+- **NetBird**: logged in from the installer (or carried over), the machine is on the mesh as `<name>`.
+- **GitHub**: the installer logged you in and pushed the machine's commit; `vx sync` works right away.
+- **Secrets**: with a carried-over host key they already work. A new machine's key was added to
+  `.sops.yaml` and pushed; within the hour one of your other machines re-encrypts `secrets.yaml` for it and
+  pushes, and the new machine picks that up and switches by itself (every 10 minutes). See
+  [Secrets](#after-installing-once).
 
 **Without the custom ISO**: from any NixOS installer, connect to the network and run
 `sudo nix --extra-experimental-features 'nix-command flakes' run github:vainnor/nixos`. It's the same
@@ -218,12 +235,13 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 <details>
 <summary><b>Secure Boot + TPM unlock</b></summary>
 
-1. On first boot, your own Secure Boot keys are created in `/var/lib/sbctl` (kept on `/persistent`) and the boot files are signed with them.
-2. Reboot into the BIOS. Go to *Security > Secure Boot*, set the mode to **Custom**, then **delete all keys** (this is Setup Mode). Save and reboot. systemd-boot enrolls your keys plus Microsoft's; Windows and the GPU's option ROM need Microsoft's.
-3. Back in the BIOS, turn Secure Boot **on**. Then run `vx secureboot`. It should show *Secure Boot: enabled*.
-4. If you chose TPM unlock in the installer, that first boot with Secure Boot on enrolls the TPM by itself (`tpm-first-boot-enroll`, then it removes its one-time key). Otherwise, or to redo it, run `vx tpm enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
+The usual way needs nothing here: put the firmware in **Setup Mode** before installing (Install, step 2). The installer makes your own keys in `/var/lib/sbctl` (kept on `/persistent`), enrolls them plus Microsoft's (Windows and the GPU's option ROM need those) and signs the boot files. Carried-over keys that are still enrolled work the same way. Then:
+1. After the install, turn Secure Boot **on** in the BIOS. `vx secureboot` should show *Secure Boot: enabled*.
+2. If you chose TPM unlock in the installer, that first boot with Secure Boot on enrolls the TPM by itself (`tpm-first-boot-enroll`, then it removes its one-time key). Otherwise, or to redo it, run `vx tpm enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
 
-Carried-over Secure Boot keys that are still enrolled in the firmware: the boot files were already signed during the install, so skip step 2; just turn Secure Boot on (step 3), and step 4 follows by itself.
+**Installed without Setup Mode?** Then the first boot makes the keys and signs the boot files (lanzaboote). Reboot into the BIOS, *Security > Secure Boot*, mode **Custom**, **delete all keys** (Setup Mode), save and reboot: systemd-boot enrolls your keys plus Microsoft's. Then turn Secure Boot on; step 2 follows by itself.
+
+If the firmware ever falls back to Setup Mode (a BIOS reset), systemd-boot enrolls your keys again from the copy on the ESP.
 
 </details>
 
@@ -231,9 +249,12 @@ Carried-over Secure Boot keys that are still enrolled in the firmware: the boot 
 <summary><b>Secrets (sops)</b></summary>
 
 `secrets/secrets.yaml` is encrypted (it holds the Twitch stream key and the StreamElements ID and token). Only the recipients in `.sops.yaml` can open it.
-1. If the SSH host key was carried over, secrets already work; skip this. Otherwise the installer's summary shows the PC's new age key, and `vx secrets host` shows it again.
-2. On the Mac, run `vx secrets add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
-3. Run `vx secrets edit` to fill in real values, then `vx commit "..."` and `vx deploy`.
+Each machine opens it with its SSH host key. Nothing to do on a reinstall that carried the host key over. For a new machine (with `meta.secretsReady = true`) it's automatic:
+1. The installer adds the machine's key to `.sops.yaml` and pushes.
+2. Every machine that can already decrypt runs `vx secrets rekey --push` hourly (`vx-secrets-rekey.timer`): it re-encrypts the file for the new recipient, commits and pushes. Running it by hand on any of them (or on the Mac) does the same right away.
+3. The new machine runs `vx secrets wait` every 10 minutes (`vx-secrets-wait.timer`): once it can decrypt, it switches to the flake and stops for good (`/persistent/install/secrets-ok`). `vx secrets ready` says whether this machine can decrypt.
+
+To change values: `vx secrets edit`, then `vx commit "..."` and `vx deploy`. The very first machine (or a fork's) still needs a recipient by hand: `vx secrets host` prints its key, `vx secrets add-host age1...` on the Mac adds it and sets `meta.secretsReady = true`.
 
 What's in there: the Twitch key and StreamElements token, the WinApps password, your Wi-Fi (`wifi/ssid`, `wifi/psk`), a NetBird setup key (`netbird/setup_key`, so the PC joins the mesh by itself) and the restic target (see Backups).
 
