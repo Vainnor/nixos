@@ -79,7 +79,36 @@ mod tests {
     use super::*;
     use crate::cmd::install::engine::tests::plan_fresh;
 
-    const META: &str = include_str!("../../../../../../modules/flake/meta.nix");
+    /// The real meta.nix when the whole repo is there; the Nix build only has
+    /// tools/vx, so it falls back to a copy of the lines the edits touch.
+    fn meta_text() -> String {
+        let real = concat!(env!("CARGO_MANIFEST_DIR"), "/../../modules/flake/meta.nix");
+        std::fs::read_to_string(real).unwrap_or_else(|_| {
+            r#"{ lib, ... }:
+{
+  config.meta = {
+    username = "vainnor";
+    fullName = "Vainnor";
+    email = "me@example.com";
+
+    timeZone = "America/Chicago";
+
+    repoUrl = "https://github.com/vainnor/nixos";
+
+    # Where the repo is cloned on the PC (nh uses this).
+    flakePath = "/home/vainnor/nixos";
+
+    # Wallpaper and colours.
+    #   wallpaper: a folder in assets/wallpapers (`vx wallpapers` lists them),
+    wallpaper = "eye";
+    theme = "match";
+    themeOverrides = { };
+  };
+}
+"#
+            .to_string()
+        })
+    }
 
     /// A copy of modules/hosts/arc/default.nix (the part that matters).
     const HOST: &str = r#"{ inputs, config, ... }:
@@ -107,7 +136,8 @@ mod tests {
 
     #[test]
     fn meta_edits_only_those_lines() {
-        let out = edit_meta(META, &settings()).unwrap();
+        let meta = &meta_text();
+        let out = edit_meta(meta, &settings()).unwrap();
         assert!(out.contains("    username = \"carson\";\n"));
         assert!(out.contains("    flakePath = \"/home/carson/nixos\";\n"));
         assert!(out.contains("    timeZone = \"Europe/Oslo\";\n"));
@@ -116,29 +146,32 @@ mod tests {
         // Comments and look-alike keys stay.
         assert!(out.contains("#   wallpaper: a folder in assets/wallpapers"));
         assert!(out.contains("themeOverrides = { };"));
-        assert_eq!(get_string(&out, "email"), get_string(META, "email"));
+        assert_eq!(get_string(&out, "email"), get_string(meta, "email"));
         // Exactly five lines changed.
-        let changed = META.lines().zip(out.lines()).filter(|(a, b)| a != b).count();
+        let changed = meta.lines().zip(out.lines()).filter(|(a, b)| a != b).count();
         assert_eq!(changed, 5);
-        assert_eq!(META.lines().count(), out.lines().count());
+        assert_eq!(meta.lines().count(), out.lines().count());
     }
 
     #[test]
     fn meta_edit_is_idempotent() {
-        let once = edit_meta(META, &settings()).unwrap();
+        let meta = &meta_text();
+        let once = edit_meta(meta, &settings()).unwrap();
         assert_eq!(edit_meta(&once, &settings()).unwrap(), once);
     }
 
     #[test]
     fn meta_without_a_key_fails() {
-        let broken = META.replace("timeZone = ", "tz = ");
+        let meta = &meta_text();
+        let broken = meta.replace("timeZone = ", "tz = ");
         let e = edit_meta(&broken, &settings()).unwrap_err().to_string();
         assert!(e.contains("timeZone"), "{e}");
     }
 
     #[test]
     fn reads_the_default_username() {
-        assert_eq!(get_string(META, "username").as_deref(), Some("vainnor"));
+        let meta = &meta_text();
+        assert_eq!(get_string(meta, "username").as_deref(), Some("vainnor"));
     }
 
     #[test]
