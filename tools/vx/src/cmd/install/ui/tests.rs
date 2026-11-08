@@ -5,7 +5,8 @@ use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::plan::{
     Carry, DataMode, GitHubMode, Gpu, HomePlan, HostPlan, Outcome, Previous, Secret, StepState, Unlocked, OLD_MOUNT, WORK_REPO,
 };
-use super::app::{App, Field, GhOut, GhPhase, HomeKind, Modal, Progress, Screen, TaskOut, Use};
+use super::super::engine::netbird::{Login as NbLogin, Start as NbStart, Status as NbStatus};
+use super::app::{App, Exit, Field, GhOut, GhPhase, HomeKind, Modal, NbOut, NbPhase, Progress, Screen, TaskOut, Use};
 use super::backend::Backend;
 use super::{demo, view};
 use ratatui::Terminal;
@@ -62,7 +63,13 @@ fn prepared() -> App {
     a.apply(TaskOut::Loaded(Ok(Box::new(demo::data()))));
     logged_in(&mut a, owner());
     a.apply(prepared_repo());
+    // The netbird step is its own test; plan tests skip it.
+    a.nb.skipped = true;
     a
+}
+
+fn nb_status() -> NbStatus {
+    NbStatus { ip: "100.92.14.7".into(), fqdn: "arc.netbird.cloud".into() }
 }
 
 fn code() -> DeviceCode {
@@ -294,6 +301,11 @@ fn walk_the_screens_with_keys() {
     // skip the previous install
     a.focus = Some(Field::SkipPrevious);
     key(&mut a, KeyCode::Enter);
+    // netbird: can't go on without logging in or skipping
+    assert_eq!(a.screen, Screen::NetBird);
+    assert_eq!(a.focus, Some(Field::NbLogin));
+    a.focus = Some(Field::NbSkip);
+    key(&mut a, KeyCode::Enter);
     assert_eq!(a.screen, Screen::System);
     // q quits before anything ran.
     let mut b = app();
@@ -301,11 +313,62 @@ fn walk_the_screens_with_keys() {
     assert!(b.exit.is_some());
     // esc goes back
     key(&mut a, KeyCode::Esc);
+    assert_eq!(a.screen, Screen::NetBird);
+    key(&mut a, KeyCode::Esc);
     assert_eq!(a.screen, Screen::Previous);
     key(&mut a, KeyCode::Esc);
     assert_eq!(a.screen, Screen::Machine);
     key(&mut a, KeyCode::Esc);
     assert_eq!(a.screen, Screen::GitHub);
+}
+
+#[test]
+fn netbird_step() {
+    let mut a = unlocked();
+    passwords(&mut a);
+    a.nb.skipped = false;
+    // Carried over: no screen, nothing logged in here.
+    assert!(a.carry.contains(&super::super::plan::Carry::NetBird));
+    assert!(!a.order().contains(&Screen::NetBird));
+    assert!(!a.build_plan().unwrap().netbird);
+    a.carry.remove(&super::super::plan::Carry::NetBird);
+    assert!(a.order().contains(&Screen::NetBird));
+    let o = a.order();
+    let at = |s: Screen| o.iter().position(|x| *x == s).unwrap();
+    assert!(at(Screen::Previous) < at(Screen::NetBird) && at(Screen::NetBird) < at(Screen::System), "after the machine is named");
+    assert!(a.build_plan().unwrap_err().contains("netbird"));
+    a.go(Screen::NetBird);
+    a.apply(TaskOut::Nb(NbOut::Started(Ok(NbStart::Login(NbLogin { url: "https://login.netbird.io/activate?user_code=QXRT-WZPL".into(), code: Some("QXRT-WZPL".into()) }))), vec![]));
+    assert!(matches!(a.nb.phase, NbPhase::Code(_)));
+    a.nb_cancel();
+    assert!(matches!(a.nb.phase, NbPhase::Start));
+    a.nb.host = "arc".into();
+    a.apply(TaskOut::Nb(NbOut::Done(Ok(nb_status())), vec!["$ netbird up --no-browser --hostname arc".into()]));
+    assert!(a.nb.done());
+    assert!(a.build_plan().unwrap().netbird);
+    // Offline: no netbird step.
+    let mut b = App::new(Backend::Demo, true, None, None, false);
+    b.apply(TaskOut::Probed(Box::new(demo::machine()), Ok(demo::disks())));
+    assert!(!b.order().contains(&Screen::NetBird));
+}
+
+#[test]
+fn secure_boot_setup_mode_and_firmware_reboot() {
+    let mut a = prepared();
+    a.skipped_previous = true;
+    passwords(&mut a);
+    assert!(a.build_plan().unwrap().setup_mode, "the demo firmware is in setup mode");
+    a.machine.as_mut().unwrap().setup_mode = false;
+    assert!(!a.build_plan().unwrap().setup_mode);
+    // The welcome screen offers the bios when not in setup mode.
+    let mut w = app();
+    w.machine.as_mut().unwrap().setup_mode = false;
+    w.fix_focus();
+    assert!(w.focusables().contains(&Field::RebootFirmware));
+    w.focus = Some(Field::RebootFirmware);
+    key(&mut w, KeyCode::Enter);
+    assert_eq!(w.exit, Some(Exit::Firmware));
+    assert!(!app().focusables().contains(&Field::RebootFirmware), "setup mode already: nothing to do");
 }
 
 #[test]
@@ -522,6 +585,23 @@ fn render_every_screen() {
     dump("welcome-probing", &mut a);
     let mut a = app();
     dump("welcome", &mut a);
+    a.machine.as_mut().unwrap().setup_mode = false;
+    a.focus = Some(Field::RebootFirmware);
+    dump("welcome-no-setup-mode", &mut a);
+
+    // NetBird: log in, the link and code, logged in.
+    let mut a = unlocked();
+    a.carry.remove(&super::super::plan::Carry::NetBird);
+    a.nb.skipped = false;
+    a.go(Screen::NetBird);
+    dump("netbird-login", &mut a);
+    a.nb.host = "arc".into();
+    a.nb.phase = NbPhase::Code(NbLogin { url: "https://login.netbird.io/activate?user_code=QXRT-WZPL".into(), code: Some("QXRT-WZPL".into()) });
+    a.focus = Some(Field::NbCancel);
+    dump("netbird-code", &mut a);
+    a.nb.phase = NbPhase::Done(nb_status());
+    a.focus = None;
+    dump("netbird-done", &mut a);
 
     // GitHub: log in, the code, the owner, someone without and with a fork.
     let mut a = app();
@@ -660,20 +740,22 @@ fn render_every_screen() {
         age_key: "age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq".into(),
         host_key_carried: false,
         next_steps: vec![
-            "remove the usb stick and reboot; if windows starts, pick the nixos drive with f11.".into(),
-            "secure boot: in the bios, reset to setup mode, boot nixos once so it enrolls its keys, then turn secure boot on.".into(),
-            "secrets: on the mac run  vx secrets add-host <the age key above>, push, then  vx switch  here.".into(),
+            "remove the usb stick and reboot into nixos".into(),
+            "turn secure boot on in the bios (your keys are enrolled); the disk then unlocks itself".into(),
+            "secrets: your other machines add this one automatically (or run vx secrets rekey on the mac); it switches by itself once they have".into(),
         ],
         pushed: Some("vainnor/nixos main".into()),
         not_pushed: None,
+        sb_enrolled: true,
+        secrets_pending: true,
+        netbird: Some("100.92.14.7 (arc.netbird.cloud)".into()),
     });
     a.screen = Screen::Summary;
     a.focus = None;
     dump("summary", &mut a);
     let o = a.progress.as_mut().unwrap().outcome.as_mut().unwrap();
     o.pushed = None;
-    o.not_pushed = Some("the push failed: ! [rejected] HEAD -> main (fetch first)".into());
-    o.next_steps.push("push later: cd ~/nixos && git push".into());
+    o.not_pushed = Some("the push failed (! [rejected] HEAD -> main (fetch first)): push from ~/nixos later".into());
     dump("summary-not-pushed", &mut a);
 
     let p = a.progress.as_mut().unwrap();

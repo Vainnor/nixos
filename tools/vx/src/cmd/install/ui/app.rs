@@ -2,6 +2,7 @@
 //! keys, and turning it all into a [`Plan`].
 
 use super::super::engine::github::{Account, DeviceCode, Fork};
+use super::super::engine::netbird::{self as nbe, Login as NbLoginInfo, Status as NbStatus};
 use super::super::engine::settings::host_name;
 use super::super::plan::{
     Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, GitHubMode, GitHubPlan, Gpu, HomePlan, HostInfo, HostPlan, InstallData,
@@ -30,6 +31,7 @@ pub enum Screen {
     GitHub,
     Machine,
     Previous,
+    NetBird,
     System,
     Data,
     Options,
@@ -40,11 +42,12 @@ pub enum Screen {
     Failed,
 }
 
-pub const STEPS: [&str; 10] = ["welcome", "github", "machine", "previous", "system", "data", "options", "passwords", "review", "install"];
+pub const STEPS: [&str; 11] =
+    ["welcome", "github", "machine", "previous", "netbird", "system", "data", "options", "passwords", "review", "install"];
 
 impl Screen {
     pub fn step(self) -> usize {
-        (self as usize).min(9)
+        (self as usize).min(10)
     }
     pub fn title(self) -> &'static str {
         match self {
@@ -52,6 +55,7 @@ impl Screen {
             Screen::GitHub => "github",
             Screen::Machine => "machine",
             Screen::Previous => "previous install",
+            Screen::NetBird => "netbird",
             Screen::System => "system drive",
             Screen::Data => "data drives",
             Screen::Options => "options",
@@ -90,6 +94,9 @@ pub enum Field {
     GhPush,
     GhFork,
     GhQuit,
+    NbLogin,
+    NbCancel,
+    NbSkip,
     /// An existing host (index into App::hosts()).
     Host(usize),
     NewHost,
@@ -129,6 +136,8 @@ pub enum Field {
     Install,
     Next,
     Reboot,
+    /// Reboot into the firmware setup (`systemctl reboot --firmware-setup`).
+    RebootFirmware,
     Shell,
 }
 
@@ -211,6 +220,39 @@ pub enum TaskOut {
     Backup(Vec<BackupTarget>),
     /// GitHub work, with the commands it ran (for the install log).
     Gh(GhOut, Vec<String>),
+    /// NetBird login, with the commands it ran.
+    Nb(NbOut, Vec<String>),
+}
+
+pub enum NbOut {
+    Started(Result<nbe::Start, String>),
+    Done(Result<NbStatus, String>),
+}
+
+/// Where the netbird step is.
+#[derive(Clone, Debug)]
+pub enum NbPhase {
+    Start,
+    /// Showing the link, waiting for the login.
+    Code(NbLoginInfo),
+    /// Logged in.
+    Done(NbStatus),
+}
+
+pub struct Nb {
+    pub phase: NbPhase,
+    pub error: Option<String>,
+    pub skipped: bool,
+    /// The host name it logged in as.
+    pub host: String,
+    pub cancel: Option<Arc<AtomicBool>>,
+    pub rx: Option<Receiver<TaskOut>>,
+}
+
+impl Nb {
+    pub fn done(&self) -> bool {
+        matches!(self.phase, NbPhase::Done(_))
+    }
 }
 
 pub enum GhOut {
@@ -305,6 +347,8 @@ impl Progress {
 pub enum Exit {
     Shell,
     Reboot,
+    /// Reboot into the BIOS / UEFI setup.
+    Firmware,
 }
 
 pub struct App {
@@ -337,6 +381,7 @@ pub struct App {
     pub pre_log: Vec<String>,
 
     pub gh: Gh,
+    pub nb: Nb,
     pub full_name: Input,
     pub email: Input,
 
@@ -411,6 +456,7 @@ impl App {
             probe_error: None,
             pre_log: vec![],
             gh: Gh { phase: GhPhase::Start, error: None, unreachable: false, skipped: false, push: true, cancel: None, rx: None },
+            nb: Nb { phase: NbPhase::Start, error: None, skipped: false, host: String::new(), cancel: None, rx: None },
             full_name: Input::default(),
             email: Input::default(),
             host_choice: None,
@@ -488,6 +534,16 @@ impl App {
                 Err(TryRecvError::Empty) => {}
             }
         }
+        if let Some(rx) = &self.nb.rx {
+            match rx.try_recv() {
+                Ok(out) => {
+                    self.nb.rx = None;
+                    self.apply(out);
+                }
+                Err(TryRecvError::Disconnected) => self.nb.rx = None,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
         if let Some(rx) = &self.gh.rx {
             match rx.try_recv() {
                 Ok(out) => {
@@ -535,6 +591,10 @@ impl App {
             TaskOut::Gh(out, logs) => {
                 self.pre_log.extend(logs);
                 self.apply_gh(out);
+            }
+            TaskOut::Nb(out, logs) => {
+                self.pre_log.extend(logs);
+                self.apply_nb(out);
             }
             TaskOut::Unlocked(Ok(u)) => {
                 self.carry = u.available.clone();
@@ -646,6 +706,76 @@ impl App {
             }
             GhOut::Forked(Err(e)) => self.gh.error = Some(e),
         }
+    }
+
+    fn apply_nb(&mut self, out: NbOut) {
+        match out {
+            NbOut::Started(Ok(nbe::Start::Login(l))) => {
+                self.nb.error = None;
+                self.nb.phase = NbPhase::Code(l);
+                self.wait_for_netbird();
+            }
+            NbOut::Started(Ok(nbe::Start::Connected(st))) | NbOut::Done(Ok(st)) => {
+                self.nb.cancel = None;
+                self.nb.error = None;
+                self.nb.phase = NbPhase::Done(st);
+                self.focus = None;
+            }
+            NbOut::Started(Err(e)) => self.nb.error = Some(e),
+            NbOut::Done(Err(e)) => {
+                self.nb.cancel = None;
+                self.nb.phase = NbPhase::Start;
+                if e != "cancelled" {
+                    self.nb.error = Some(e);
+                }
+            }
+        }
+    }
+
+    /// [ log in ] on the netbird step: `netbird up` shows a link; the wait runs in the background.
+    pub fn nb_login(&mut self) {
+        self.nb.error = None;
+        self.nb.skipped = false;
+        let host = self.host_name();
+        self.nb.host = host.clone();
+        let b = self.backend;
+        self.spawn("starting netbird", move || {
+            let (res, logs) = b.nb_start(&host);
+            TaskOut::Nb(NbOut::Started(res.map_err(|e| format!("{e:#}"))), logs)
+        });
+    }
+
+    fn wait_for_netbird(&mut self) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.nb.cancel = Some(cancel.clone());
+        let (tx, rx) = mpsc::channel();
+        let b = self.backend;
+        let _ = std::thread::Builder::new().name("nb-login".into()).spawn(move || {
+            let (res, logs) = b.nb_wait(&cancel);
+            let _ = tx.send(TaskOut::Nb(NbOut::Done(res.map_err(|e| format!("{e:#}"))), logs));
+        });
+        self.nb.rx = Some(rx);
+    }
+
+    pub fn nb_cancel(&mut self) {
+        if let Some(c) = self.nb.cancel.take() {
+            c.store(true, Ordering::SeqCst);
+        }
+        self.nb.rx = None;
+        if !self.nb.done() {
+            self.nb.phase = NbPhase::Start;
+            self.backend.nb_stop();
+        }
+    }
+
+    /// The old install's NetBird login is carried over: no login screen.
+    pub fn netbird_carried(&self) -> bool {
+        self.carry.contains(&Carry::NetBird) && self.unlocked.as_ref().is_some_and(|u| u.available.contains(&Carry::NetBird))
+    }
+
+    /// The netbird step is part of this install (online, nothing carried).
+    pub fn uses_netbird(&self) -> bool {
+        self.uses_github() && !self.netbird_carried()
     }
 
     /// [ log in ]: get a code; the wait for it runs in the background.
@@ -1008,6 +1138,9 @@ impl App {
         if self.previous.is_some() {
             v.push(Screen::Previous);
         }
+        if self.uses_netbird() {
+            v.push(Screen::NetBird);
+        }
         v.extend([Screen::System, Screen::Data, Screen::Options, Screen::Passwords, Screen::Review]);
         v
     }
@@ -1025,6 +1158,9 @@ impl App {
     pub fn back(&mut self) {
         if self.screen == Screen::GitHub {
             self.gh_cancel();
+        }
+        if self.screen == Screen::NetBird {
+            self.nb_cancel();
         }
         let o = self.order();
         if let Some(i) = o.iter().position(|s| *s == self.screen)
@@ -1064,6 +1200,13 @@ impl App {
             Screen::GitHub => self.check_github(),
             Screen::Machine => self.check_machine(),
             Screen::Previous => self.check_previous(),
+            Screen::NetBird => {
+                if self.nb.done() || self.nb.skipped || !self.uses_netbird() {
+                    Ok(())
+                } else {
+                    Err("log in to netbird, or skip it".into())
+                }
+            }
             Screen::System => self.check_system(),
             Screen::Data => self.check_data(),
             Screen::Options => self.check_options(),
@@ -1252,7 +1395,7 @@ impl App {
     }
 
     pub fn build_plan(&self) -> Result<Plan, String> {
-        for s in [Screen::GitHub, Screen::Machine, Screen::Previous, Screen::System, Screen::Data, Screen::Options, Screen::Passwords] {
+        for s in [Screen::GitHub, Screen::Machine, Screen::Previous, Screen::NetBird, Screen::System, Screen::Data, Screen::Options, Screen::Passwords] {
             self.check(s)?;
         }
         let data = self.data.as_ref().ok_or("the install data isn't loaded")?;
@@ -1327,6 +1470,8 @@ impl App {
             previous: self.unlocked.clone(),
             carry: if self.unlocked.is_some() { self.carry.clone() } else { BTreeSet::new() },
             home,
+            setup_mode: self.machine.as_ref().is_some_and(|m| m.setup_mode),
+            netbird: self.uses_netbird() && self.nb.done(),
         })
     }
 

@@ -68,6 +68,7 @@ pub fn run(args: InstallArgs, repo: Option<std::path::PathBuf>) -> Result<()> {
     }));
     let res = event_loop(&mut term, &mut app);
     ratatui::restore();
+    backend.nb_stop();
     if app.unlocked.is_some() && !app.installing() {
         backend.close_previous();
     }
@@ -75,11 +76,15 @@ pub fn run(args: InstallArgs, repo: Option<std::path::PathBuf>) -> Result<()> {
     if app.progress.is_some() {
         println!("log: {LOG_FILE}");
     }
-    if exit == Exit::Reboot {
+    if matches!(exit, Exit::Reboot | Exit::Firmware) {
+        let mut args = vec!["reboot"];
+        if exit == Exit::Firmware {
+            args.push("--firmware-setup");
+        }
         if backend.is_real() {
-            std::process::Command::new("systemctl").arg("reboot").status()?;
+            std::process::Command::new("systemctl").args(&args).status()?;
         } else {
-            println!("({}: not rebooting)", backend.label());
+            println!("({}: not running systemctl {})", backend.label(), args.join(" "));
         }
     }
     Ok(())

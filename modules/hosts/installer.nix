@@ -10,6 +10,15 @@
 # Boot it (UEFI). The installer opens on its own; plug in Ethernet first, or
 # quit it and run `nmtui` for Wi-Fi, then `vx-installer` to start it again.
 # Without working graphics it runs straight on the console instead.
+#
+# Secure Boot: when the firmware is in Setup Mode the installer enrolls the
+# keys itself (sbctl create-keys + enroll-keys). efivarfs is writable here:
+# systemd mounts it read-write (nosuid,nodev,noexec), NixOS adds no options.
+# Existing PK/KEK/db files may be immutable (chattr -i, e2fsprogs is here).
+#
+# NetBird: the same client and paths as the installed system
+# (/var/lib/netbird/config.json), so the login made here (`netbird up
+# --hostname <host>`) is copied to /persistent/var/lib/netbird as is.
 {
   inputs,
   self,
@@ -132,7 +141,22 @@ in
             jq
             pciutils # lspci: the installer detects the GPU
             coreutils
+            sbctl # Secure Boot keys, enrolled here when the firmware is in Setup Mode
+            sops # secrets.yaml: can the carried-over host key decrypt it?
           ]);
+
+          # Same sbctl key paths as lanzaboote on the installed system
+          # (pkiBundle /var/lib/sbctl), so the keys made here are copied as is.
+          environment.etc."sbctl/sbctl.conf".text = ''
+            keydir: /var/lib/sbctl/keys
+            guid: /var/lib/sbctl/GUID
+          '';
+
+          # NetBird daemon + `netbird` CLI (the installer's login screen).
+          # State in /var/lib/netbird, as on the installed system. It only logs
+          # in when the installer runs `netbird up`.
+          services.netbird.enable = true;
+          networking.firewall.checkReversePath = "loose"; # WireGuard
           # Also for `vx install` run by hand (sudo drops it, so vx-installer passes --data itself).
           environment.variables.VX_INSTALL_DATA = "${self.packages.${system}.install-data}";
 

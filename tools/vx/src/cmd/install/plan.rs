@@ -342,6 +342,12 @@ pub struct Plan {
     pub previous: Option<Unlocked>,
     pub carry: BTreeSet<Carry>,
     pub home: HomePlan,
+    /// The firmware was in Setup Mode when the installer started: a "secure
+    /// boot" step enrolls the keys (checked again when it runs).
+    pub setup_mode: bool,
+    /// Logged in to NetBird on the installer: its [`NETBIRD_STATE`] is copied
+    /// into the new system.
+    pub netbird: bool,
 }
 
 /// Facts about this machine, gathered once at start (and shown on the welcome screen).
@@ -514,8 +520,15 @@ pub struct Outcome {
     pub next_steps: Vec<String>,
     /// Where the install commit was pushed (`owner/repo branch`), None when it wasn't.
     pub pushed: Option<String>,
-    /// Why it wasn't pushed (offline, failed, turned off).
+    /// Why it wasn't pushed (offline, failed, turned off), and what to do about it.
     pub not_pushed: Option<String>,
+    /// Secure Boot keys were enrolled in the firmware by the installer.
+    pub sb_enrolled: bool,
+    /// Secrets are on but this new host isn't a recipient yet: another machine
+    /// re-encrypts them, then this one switches by itself.
+    pub secrets_pending: bool,
+    /// NetBird login carried or made on the installer: "ip (fqdn)" when known.
+    pub netbird: Option<String>,
 }
 
 // ---------------------------------------------------------------- shared with Nix
@@ -536,6 +549,25 @@ pub const INSTALLED_KEYS: &str = "/persistent/etc/keys";
 pub const TPM_ENROLL_KEY: &str = "/persistent/install/tpm-enroll.key";
 /// gh's config dir on the installer (hosts.yml holds the login; RAM).
 pub const GH_CONFIG: &str = "/tmp/vx-install/gh";
+
+/// NetBird's state directory, on the installer and in the installed system
+/// (services.netbird client "default": dir.state, NB_CONFIG = <it>/config.json).
+/// The installer logs in with the ISO's own daemon, runs `netbird down`, then
+/// copies this whole folder to /persistent<it>.
+pub const NETBIRD_STATE: &str = "/var/lib/netbird";
+/// The login file in NETBIRD_STATE.
+pub const NETBIRD_CONFIG: &str = "config.json";
+/// The new host's SSH host key, made before the settings commit (its age
+/// recipient goes into .sops.yaml), then copied to /persistent/etc/ssh.
+pub const HOST_KEY_WORK: &str = "/tmp/vx-install/hostkey";
+/// sbctl's keys on the installer (/etc/sbctl/sbctl.conf there; lanzaboote's
+/// pkiBundle on the installed system), copied to the new system's
+/// /persistent/var/lib/sbctl and /var/lib/sbctl.
+pub const SBCTL_DIR: &str = "/var/lib/sbctl";
+/// "This host has its secrets": the vx-secrets-wait timer runs until it
+/// exists. The installer writes it when the old host key was carried over;
+/// `vx secrets wait` (and the unit) write it after switching.
+pub const SECRETS_OK: &str = "/persistent/install/secrets-ok";
 
 /// A host's folder, relative to the repo.
 pub fn host_dir(host: &str) -> String {

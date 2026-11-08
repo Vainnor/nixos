@@ -20,7 +20,12 @@ in
         };
         services.resolved.enable = true;
 
-        # Interface wt0.
+        # Interface wt0. Login + peer identity: /var/lib/netbird/config.json
+        # (NB_CONFIG; persisted in system/impermanence.nix). The installer logs
+        # in on the ISO with `netbird up --hostname <host>` and copies that
+        # folder here. The name is fixed by the management server when the
+        # peer registers; later the daemon reports the system hostname, which
+        # is the same host name (hosts.nix). Nothing here sets a hostname.
         services.netbird.enable = true;
         # WireGuard + strict reverse-path filtering don't mix.
         networking.firewall.checkReversePath = "loose";

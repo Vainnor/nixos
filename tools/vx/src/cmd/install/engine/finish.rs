@@ -21,67 +21,54 @@ pub enum PushState {
 pub struct NextInput {
     /// The old Secure Boot keys were carried over.
     pub sb_carried: bool,
-    /// The firmware is in Setup Mode right now.
-    pub setup_mode: bool,
+    /// The installer enrolled the keys (the firmware was in Setup Mode).
+    pub sb_enrolled: bool,
     /// Encryption + TPM unlock.
     pub tpm: bool,
-    /// A new host key was made (secrets need the new recipient).
-    pub host_key_new: bool,
-    pub age: String,
-    pub netbird_carried: bool,
-    /// ~/nixos is a snapshot of the usb's copy, with its own history.
-    pub snapshot: bool,
-    /// gh's login was copied into the new home.
-    pub gh_copied: bool,
-    /// Installed from the user's fork (their own secrets, not the owner's).
-    pub fork: bool,
-    pub push: PushState,
+    /// Secrets are on and this new host waits for another machine to re-encrypt them.
+    pub secrets_pending: bool,
 }
 
+/// Only what needs a person: the usb and reboot, Secure Boot in the BIOS, and
+/// (as a note) the secrets that arrive by themselves. GitHub, NetBird and the
+/// push are done by the installer; a push that didn't happen is in
+/// [`not_pushed`].
 pub fn next_steps(i: &NextInput) -> Vec<String> {
     let mut v = vec!["remove the usb stick and reboot into nixos".to_string()];
-    if i.sb_carried && !i.setup_mode {
-        v.push("turn secure boot back on in the bios: your keys are still enrolled".into());
+    let tpm = if i.tpm { "; the disk then unlocks itself" } else { "" };
+    if i.sb_enrolled {
+        v.push(format!("turn secure boot on in the bios (your keys are enrolled){tpm}"));
+    } else if i.sb_carried {
+        v.push(format!("turn secure boot back on in the bios: your keys are still enrolled{tpm}"));
     } else {
+        v.push(format!(
+            "secure boot: boot nixos once, then in the bios set secure boot to setup mode (delete keys) and boot again: \
+             it enrolls your keys; then turn secure boot on{tpm}"
+        ));
+    }
+    if i.secrets_pending {
         v.push(
-            "boot nixos once, then in the bios set secure boot to setup mode (delete keys) and boot again: \
-             it enrolls your keys; then turn secure boot on"
+            "secrets: your other machines add this one automatically (or run vx secrets rekey on the mac); \
+             it switches by itself once they have"
                 .into(),
         );
-    }
-    if i.tpm {
-        v.push("the disk unlocks itself once secure boot is on".into());
-    }
-    if i.fork {
-        v.push(
-            "secrets are off (secretsReady = false): your fork can't read the owner's secrets.yaml. \
-             make your own with sops when you need them"
-                .into(),
-        );
-    } else if i.host_key_new {
-        v.push(format!("on the mac: vx secrets add-host {}, push, then vx switch on the pc", i.age));
-    }
-    if !i.netbird_carried {
-        v.push("sudo netbird up".into());
-    }
-    if !i.gh_copied {
-        v.push("gh auth login".into());
-    }
-    if i.snapshot {
-        v.push(
-            "~/nixos is the usb's copy with its own history: git fetch origin, then rebase the install settings \
-             commit onto origin/main"
-                .into(),
-        );
-    }
-    match &i.push {
-        PushState::Pushed(_) => {}
-        PushState::Offline => v.push("push later with vx sync: the install commit is only in ~/nixos".into()),
-        PushState::Off => v.push("push when ready: cd ~/nixos && git push".into()),
-        PushState::Failed(_) | PushState::NotPushed(_) if i.snapshot => {}
-        PushState::Failed(_) | PushState::NotPushed(_) => v.push("push later: cd ~/nixos && git push".into()),
     }
     v
+}
+
+/// Why the install commit isn't on GitHub, and what to do about it (None when pushed).
+pub fn not_pushed(push: &PushState, snapshot: bool) -> Option<String> {
+    let s = match push {
+        PushState::Pushed(_) => return None,
+        _ if snapshot => "the repo came from the usb (its own history): in ~/nixos, fetch origin and rebase the install \
+                          commit onto origin/main, then push"
+            .to_string(),
+        PushState::Offline => "offline: committed in ~/nixos only; push later with vx sync".into(),
+        PushState::Off => "you chose not to push: push from ~/nixos when ready".into(),
+        PushState::Failed(e) => format!("the push failed ({e}): push from ~/nixos later"),
+        PushState::NotPushed(why) => format!("{why}: push from ~/nixos later"),
+    };
+    Some(s)
 }
 
 /// Firmware Setup Mode, from efivars (byte 4 after the attribute word).
@@ -123,44 +110,37 @@ mod tests {
     }
 
     #[test]
-    fn fresh_install_steps() {
-        let v = next_steps(&NextInput { host_key_new: true, age: "age1xyz".into(), tpm: true, ..Default::default() });
-        assert!(v[0].contains("usb"));
-        assert!(v[1].starts_with("boot nixos once, then in the bios set secure boot to setup mode"));
-        assert!(v.contains(&"the disk unlocks itself once secure boot is on".to_string()));
-        assert!(v.contains(&"on the mac: vx secrets add-host age1xyz, push, then vx switch on the pc".to_string()));
-        assert!(v.contains(&"sudo netbird up".to_string()));
-        assert!(v.contains(&"gh auth login".to_string()));
-        assert_eq!(v.last().unwrap(), "push later with vx sync: the install commit is only in ~/nixos");
+    fn only_what_needs_a_person() {
+        let v = next_steps(&NextInput { sb_enrolled: true, tpm: true, secrets_pending: true, ..Default::default() });
+        assert_eq!(
+            v,
+            [
+                "remove the usb stick and reboot into nixos",
+                "turn secure boot on in the bios (your keys are enrolled); the disk then unlocks itself",
+                "secrets: your other machines add this one automatically (or run vx secrets rekey on the mac); it switches by itself once they have",
+            ]
+        );
+        let all = v.join(" ");
+        assert!(!all.contains("netbird") && !all.contains("gh auth") && !all.contains("add-host") && !all.contains("push"));
     }
 
     #[test]
-    fn pushed_and_logged_in() {
-        let v = next_steps(&NextInput { gh_copied: true, push: PushState::Pushed("vainnor/nixos main".into()), ..Default::default() });
-        assert!(!v.iter().any(|s| s.contains("gh auth") || s.contains("push")), "{v:?}");
-        let v = next_steps(&NextInput { push: PushState::Failed("rejected".into()), ..Default::default() });
-        assert_eq!(v.last().unwrap(), "push later: cd ~/nixos && git push");
-        let v = next_steps(&NextInput { fork: true, host_key_new: true, age: "age1x".into(), ..Default::default() });
-        assert!(v.iter().any(|s| s.starts_with("secrets are off")));
-        assert!(!v.iter().any(|s| s.contains("add-host")), "no owner secrets for a fork");
-    }
-
-    #[test]
-    fn carried_everything() {
-        let v = next_steps(&NextInput { sb_carried: true, netbird_carried: true, ..Default::default() });
+    fn secure_boot_cases() {
+        let v = next_steps(&NextInput { sb_carried: true, ..Default::default() });
         assert_eq!(v[1], "turn secure boot back on in the bios: your keys are still enrolled");
-        assert!(!v.iter().any(|s| s.contains("netbird") || s.contains("add-host") || s.contains("tpm") || s.contains("unlocks")));
+        assert_eq!(v.len(), 2, "secrets off or carried: nothing said");
+        let v = next_steps(&NextInput::default());
+        assert!(v[1].starts_with("secure boot: boot nixos once, then in the bios set secure boot to setup mode"));
+        // Carried keys enrolled again because the firmware was in setup mode.
+        let v = next_steps(&NextInput { sb_carried: true, sb_enrolled: true, ..Default::default() });
+        assert_eq!(v[1], "turn secure boot on in the bios (your keys are enrolled)");
     }
 
     #[test]
-    fn carried_keys_but_setup_mode() {
-        let v = next_steps(&NextInput { sb_carried: true, setup_mode: true, ..Default::default() });
-        assert!(v[1].starts_with("boot nixos once"));
-    }
-
-    #[test]
-    fn snapshot_note() {
-        let v = next_steps(&NextInput { snapshot: true, ..Default::default() });
-        assert!(v.iter().any(|s| s.contains("its own history")));
+    fn why_not_pushed() {
+        assert_eq!(not_pushed(&PushState::Pushed("vainnor/nixos main".into()), false), None);
+        assert!(not_pushed(&PushState::Offline, false).unwrap().contains("vx sync"));
+        assert!(not_pushed(&PushState::Failed("rejected".into()), false).unwrap().contains("push from ~/nixos"));
+        assert!(not_pushed(&PushState::NotPushed("x".into()), true).unwrap().contains("its own history"));
     }
 }

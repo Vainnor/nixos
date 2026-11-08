@@ -30,6 +30,12 @@ pub fn get_string(text: &str, key: &str) -> Option<String> {
     re.captures(text).map(|c| c[1].to_string())
 }
 
+/// A `<key> = true|false;` from a Nix file (first uncommented match).
+pub fn get_bool(text: &str, key: &str) -> Option<bool> {
+    let re = Regex::new(&format!(r"(?m)^[ \t]*{} = (true|false);", regex::escape(key))).unwrap();
+    re.captures(text).map(|c| &c[1] == "true")
+}
+
 /// meta.nix with the user's settings.
 pub fn edit_meta(text: &str, s: &Settings) -> Result<String> {
     const F: &str = "modules/flake/meta.nix";

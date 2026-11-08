@@ -91,7 +91,7 @@ fn help_text(app: &App) -> String {
         Screen::Summary | Screen::Failed => format!("{up} move · enter select · q quit"),
         _ if app.focus.is_some_and(|f| f.is_input()) => format!("type · enter next · {up}/tab move · ctrl+u clear · esc back"),
         Screen::Welcome => format!("{up} move · space toggle · enter select · q quit"),
-        Screen::GitHub => format!("{up} move · enter select · esc back · q quit"),
+        Screen::GitHub | Screen::NetBird => format!("{up} move · enter select · esc back · q quit"),
         _ => format!("{up} move · space toggle · {lr} change · enter select · esc back · q quit"),
     }
 }

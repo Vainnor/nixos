@@ -3,6 +3,7 @@
 
 mod cmd;
 mod ctx;
+mod sops;
 mod ui;
 
 use anyhow::Result;
