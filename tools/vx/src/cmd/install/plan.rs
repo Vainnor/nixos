@@ -171,6 +171,7 @@ pub struct DataDisk {
     pub name: String,
     /// Where it's mounted, e.g. /home/vainnor/games or /mnt/d.
     pub mount: String,
+    #[serde(flatten)]
     pub mode: DataMode,
 }
 
