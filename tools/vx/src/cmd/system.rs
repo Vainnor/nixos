@@ -24,6 +24,8 @@ pub enum Cmd {
         #[arg(long)]
         full: bool,
     },
+    /// git pull the repo (fast-forward only) and list the new commits; works from any folder
+    Pull,
     /// Build and switch to the current config (darwin-rebuild on the Mac)
     Switch {
         /// git pull --ff-only first
@@ -161,6 +163,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
     match cmd {
         Cmd::Status => status::run(ctx),
         Cmd::Doctor { full } => doctor::run(ctx, full),
+        Cmd::Pull => pull(ctx),
         Cmd::Switch { pull } => {
             if pull {
                 ctx.run(ctx.cmd("git").args(["pull", "--ff-only"]))?;
@@ -436,6 +439,20 @@ fn push(ctx: &Ctx) -> Result<()> {
 
 fn is_dirty(ctx: &Ctx) -> Result<bool> {
     Ok(!ctx.output(ctx.cmd("git").args(["status", "--porcelain"]))?.trim().is_empty())
+}
+
+fn pull(ctx: &Ctx) -> Result<()> {
+    let repo = ctx.repo()?.to_path_buf();
+    let before = ctx.output(ctx.cmd("git").args(["rev-parse", "HEAD"]))?;
+    ctx.run(ctx.cmd("git").args(["pull", "--ff-only", "--quiet"]))?;
+    let after = ctx.output(ctx.cmd("git").args(["rev-parse", "HEAD"]))?;
+    if before == after {
+        ui::ok(&format!("{} is up to date", repo.display()));
+        return Ok(());
+    }
+    ctx.run(ctx.cmd("git").args(["log", "--oneline", "--no-decorate", &format!("{before}..{after}")]))?;
+    ui::ok("pulled. vx switch applies it");
+    Ok(())
 }
 
 fn sync(ctx: &Ctx, message: &str, yes: bool) -> Result<()> {
