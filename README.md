@@ -98,7 +98,9 @@ Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 
 **1. Get the installer onto a USB stick.** Build the custom ISO with `vx iso` (x86_64 Linux; WSL works),
 or `nix build .#nixosConfigurations.installer.config.system.build.isoImage`. Write it to a stick with
-`vx iso --flash /dev/sdX` (or any image writer). Add `--wifi` to put the Wi-Fi this PC is on onto the
+`vx iso --flash /dev/sdX` (or any image writer), or copy it onto a [Ventoy](https://www.ventoy.net) stick
+with `vx iso --ventoy` (finds the stick by its `Ventoy` label, mounts it, replaces the old copy; nothing else
+on the stick is touched). Add `--wifi` to put the Wi-Fi this PC is on onto the
 stick (or `--wifi "<network>"`; it asks for the password when the network isn't saved here), so the stick
 connects by itself when it boots. The password is then on the stick and in the building PC's Nix store, never
 in git. Any other NixOS ISO works too, see the end of this section.

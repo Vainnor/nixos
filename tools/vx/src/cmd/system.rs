@@ -107,8 +107,11 @@ pub enum Cmd {
     /// Build the custom installer ISO (x86_64 Linux); --flash writes it to a USB stick
     Iso {
         /// USB stick to write it to, e.g. /dev/sdb (erased; asks first)
-        #[arg(long, value_name = "DEVICE")]
+        #[arg(long, value_name = "DEVICE", conflicts_with = "ventoy")]
         flash: Option<String>,
+        /// Copy it onto a Ventoy stick instead (found by its "Ventoy" label, or the folder given); nothing is erased
+        #[arg(long, value_name = "DIR", num_args = 0..=1, default_missing_value = "")]
+        ventoy: Option<String>,
         /// Put a Wi-Fi network on the stick so it connects by itself: this PC's current one, or the one named
         #[arg(long, value_name = "NETWORK", num_args = 0..=1, default_missing_value = "")]
         wifi: Option<String>,
@@ -219,7 +222,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::CachePush => cache_push(ctx),
         Cmd::New { lang, dir } => new_project(ctx, &lang, &dir),
         Cmd::Password => password(ctx),
-        Cmd::Iso { flash, wifi } => iso(ctx, flash.as_deref(), wifi.as_deref()),
+        Cmd::Iso { flash, ventoy, wifi } => iso(ctx, flash.as_deref(), ventoy.as_deref(), wifi.as_deref()),
         Cmd::Preview { gpu, reset } => preview(ctx, gpu, reset),
         Cmd::Mac(m) => {
             ctx.need(Host::Mac)?;
@@ -541,7 +544,7 @@ fn password(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
-fn iso(ctx: &Ctx, flash: Option<&str>, wifi: Option<&str>) -> Result<()> {
+fn iso(ctx: &Ctx, flash: Option<&str>, ventoy: Option<&str>, wifi: Option<&str>) -> Result<()> {
     ctx.need(Host::NixOs)?;
     let f = flake(ctx, "nixosConfigurations.installer.config.system.build.isoImage")?;
     let mut build = ctx.nix();
@@ -568,12 +571,77 @@ fn iso(ctx: &Ctx, flash: Option<&str>, wifi: Option<&str>) -> Result<()> {
             image = Some(p);
         }
     }
+    if let Some(dir) = ventoy {
+        let image = image.context("the build made no .iso")?;
+        return copy_to_ventoy(ctx, &image, dir);
+    }
     let Some(dev) = flash else {
-        ui::dim("write it to a usb stick: vx iso --flash /dev/sdX (lsblk shows which)");
+        ui::dim("put it on a usb stick: vx iso --flash /dev/sdX (lsblk shows which), or vx iso --ventoy");
         return Ok(());
     };
     let image = image.context("the build made no .iso")?;
     flash_usb(ctx, &image, dev)
+}
+
+/// Copy the ISO onto a Ventoy stick's data partition (label "Ventoy"),
+/// replacing the previous copy of the same name. Mounts it (udisks) if it
+/// isn't mounted, and unmounts it again afterwards. `dir`: a mounted folder to
+/// use instead of looking for the label.
+fn copy_to_ventoy(ctx: &Ctx, image: &Path, dir: &str) -> Result<()> {
+    let mut mounted_here = None;
+    let root = if !dir.is_empty() {
+        let d = PathBuf::from(dir);
+        if !d.is_dir() {
+            bail!("{dir} is not a folder");
+        }
+        d
+    } else {
+        let parts = ctx.output(Command::new("lsblk").args(["-nrpo", "NAME,LABEL,MOUNTPOINT"]))?;
+        let (dev, mp) = ventoy_partition(&parts).context(
+            "no ventoy stick found (no partition labelled Ventoy): plug it in, or pass its folder: vx iso --ventoy /run/media/...",
+        )?;
+        match mp {
+            Some(mp) => PathBuf::from(mp),
+            None => {
+                let out = ctx
+                    .output(Command::new("udisksctl").args(["mount", "--no-user-interaction", "-b", &dev]))
+                    .with_context(|| format!("couldn't mount {dev}; mount it yourself and pass the folder: vx iso --ventoy <folder>"))?;
+                mounted_here = Some(dev.clone());
+                // "Mounted /dev/sdb1 at /run/media/vainnor/Ventoy"
+                PathBuf::from(out.rsplit(" at ").next().unwrap_or("").trim().trim_end_matches('.'))
+            }
+        }
+    };
+    let name = image.file_name().context("the image has no name")?;
+    let dest = root.join(name);
+    ui::info(&format!("copying to {} ...", dest.display()));
+    // A temporary name first: a half-copied image never shows up in Ventoy's menu.
+    let tmp = root.join(format!(".{}.part", name.to_string_lossy()));
+    let copied = std::fs::copy(image, &tmp).and_then(|_| std::fs::rename(&tmp, &dest));
+    if let Err(e) = copied {
+        let _ = std::fs::remove_file(&tmp);
+        if e.kind() != std::io::ErrorKind::PermissionDenied {
+            return Err(e).with_context(|| format!("couldn't copy to {}", dest.display()));
+        }
+        ctx.run(ctx.sudo("cp").arg(image).arg(&dest))?;
+    }
+    ctx.run(&mut Command::new("sync"))?;
+    if let Some(dev) = mounted_here {
+        let _ = ctx.run(Command::new("udisksctl").args(["unmount", "--no-user-interaction", "-b", &dev]));
+    }
+    ui::ok(&format!("{} is on the ventoy stick: pick it in ventoy's menu (uefi, secure boot off)", name.to_string_lossy()));
+    Ok(())
+}
+
+/// `lsblk -nrpo NAME,LABEL,MOUNTPOINT` -> the Ventoy data partition (device, mountpoint).
+/// lsblk -r escapes spaces as \x20.
+fn ventoy_partition(lsblk: &str) -> Option<(String, Option<String>)> {
+    lsblk.lines().find_map(|l| {
+        let f: Vec<&str> = l.split(' ').collect();
+        let (name, label) = (*f.first()?, *f.get(1)?);
+        let mp = f.get(2).map(|m| m.replace("\\x20", " ")).filter(|m| !m.is_empty());
+        (label == "Ventoy").then(|| (name.to_string(), mp))
+    })
 }
 
 /// A folder holding one NetworkManager keyfile for `name` (empty: the Wi-Fi this
@@ -663,6 +731,10 @@ fn flash_usb(ctx: &Ctx, image: &std::path::Path, dev: &str) -> Result<()> {
         bail!("{dev} holds the running system; refusing");
     }
     let _ = ctx.run(Command::new("lsblk").args(["-o", "NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINTS", dev]));
+    let labels = ctx.probe(Command::new("lsblk").args(["-nro", "LABEL", dev])).unwrap_or_default();
+    if labels.lines().any(|l| l == "Ventoy" || l == "VTOYEFI") {
+        ui::warn(&format!("{dev} is a ventoy stick: flashing replaces ventoy and every iso on it. vx iso --ventoy copies the iso onto it instead"));
+    }
     ui::warn(&format!("everything on {dev} will be erased"));
     print!("type the device name ({dev}) to continue: ");
     let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -850,7 +922,16 @@ mod tests {
 
 #[cfg(test)]
 mod flash_tests {
-    use super::flash_target_ok;
+    use super::{flash_target_ok, ventoy_partition};
+
+    #[test]
+    fn finds_the_ventoy_partition() {
+        let l = "/dev/nvme0n1  \n/dev/sdb  \n/dev/sdb1 Ventoy /run/media/vainnor/Ventoy\n/dev/sdb2 VTOYEFI \n";
+        assert_eq!(ventoy_partition(l), Some(("/dev/sdb1".into(), Some("/run/media/vainnor/Ventoy".into()))));
+        assert_eq!(ventoy_partition("/dev/sdb1 Ventoy \n"), Some(("/dev/sdb1".into(), None)));
+        assert_eq!(ventoy_partition("/dev/sdc1 Ventoy /run/media/my\\x20disk\n").unwrap().1.as_deref(), Some("/run/media/my disk"));
+        assert_eq!(ventoy_partition("/dev/sdb1 USB /mnt\n"), None);
+    }
 
     #[test]
     fn only_usb_sticks() {

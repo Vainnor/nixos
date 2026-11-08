@@ -176,7 +176,11 @@ fn classify(disk: &Value) -> DiskKind {
     let fstype = |v: &Value| s(v, "fstype");
     let ptype = |v: &Value| s(v, "parttypename");
 
-    let installer = all.iter().any(|v| eq(&fstype(v), "iso9660") || mounts(v).iter().any(|m| m == "/iso" || m.starts_with("/iso/")));
+    // A Ventoy stick: the iso is mapped from its exFAT partition, which lsblk
+    // may not show under the stick; its VTOYEFI partition gives it away.
+    let installer = all.iter().any(|v| {
+        eq(&fstype(v), "iso9660") || mounts(v).iter().any(|m| m == "/iso" || m.starts_with("/iso/")) || eq(&s(v, "label"), "VTOYEFI")
+    });
     if installer {
         return DiskKind::Installer;
     }
@@ -581,6 +585,9 @@ pub(crate) mod tests {
         );
         // An exFAT stick has a "basic data" partition but isn't Windows.
         assert_eq!(one(&part(r#""exfat""#, r#""Microsoft basic data""#, "null"), ""), DiskKind::Other);
+        // A Ventoy stick (exFAT data + VTOYEFI) is the installer, never offered for erasing.
+        let ventoy = format!("{},{}", part(r#""exfat""#, r#""Microsoft basic data""#, r#""Ventoy""#), part(r#""vfat""#, r#""EFI System""#, r#""VTOYEFI""#));
+        assert_eq!(one(&ventoy, ""), DiskKind::Installer);
         // Old lsblk: strings for numbers and booleans, MOUNTPOINT.
         let old = r#"{"blockdevices":[{"name":"sdc","type":"disk","size":"512","rm":"1","mountpoint":null}]}"#;
         let d = parse_lsblk(old, &BTreeMap::new()).unwrap();

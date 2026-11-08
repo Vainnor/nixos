@@ -5,7 +5,8 @@
 #
 #   Build (any x86_64 Linux, WSL works, or the GitHub Action): `vx iso`, or
 #     nix build .#nixosConfigurations.installer.config.system.build.isoImage
-#   Write it to a USB stick: `vx iso --flash /dev/sdX`.
+#   Write it to a USB stick: `vx iso --flash /dev/sdX`, or copy it onto a
+#   Ventoy stick: `vx iso --ventoy`.
 #
 # Boot it (UEFI). The installer opens on its own. Network: Ethernet, or the
 # Wi-Fi baked in with `vx iso --wifi` (connects by itself on boot), or
