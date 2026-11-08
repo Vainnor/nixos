@@ -37,7 +37,6 @@
 let
   slate = (import ../../assets/themes/vainnor-slate.nix).scheme;
 
-  # Every flake input's source, nested inputs too (deduplicated by store path).
   # `vx iso --wifi`: NetworkManager keyfiles to bake in (impure builds only; "" otherwise).
   wifiDir = builtins.getEnv "VX_ISO_WIFI";
   wifiEtc =
@@ -59,9 +58,22 @@ let
         )
     );
 
+  # Every flake input's source, nested inputs too (deduplicated by store path).
+  # flake-compat is skipped: nothing evaluates it, and the FlakeHub tarball
+  # one (pulled in by a nested input) fails to fetch on Nix 2.34 ("mismatch
+  # in field 'url'": its locked URL has ?rev=... the fetcher drops).
   inputSources =
     let
-      go = input: [ input.outPath ] ++ builtins.concatMap go (builtins.attrValues (input.inputs or { }));
+      go =
+        input:
+        [ input.outPath ]
+        ++ builtins.concatMap go (
+          builtins.attrValues (
+            inputs.nixpkgs.lib.filterAttrs (n: _: !(inputs.nixpkgs.lib.hasPrefix "flake-compat" n)) (
+              input.inputs or { }
+            )
+          )
+        );
     in
     inputs.nixpkgs.lib.unique (
       builtins.concatMap go (builtins.attrValues (removeAttrs inputs [ "self" ]))
