@@ -7,7 +7,7 @@ use super::validate::human_bytes;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Padding, Paragraph, Wrap};
 
 pub fn draw(f: &mut Frame, app: &App) {
     let t = &app.theme;
@@ -40,9 +40,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     screens::draw_body(f, inner, app);
 
     f.render_widget(Paragraph::new(Span::styled(help_text(app), t.muted())), Rect { x: help.x + 1, width: help.width.saturating_sub(1), ..help });
-    match &app.modal {
-        Some(m) => modal(f, area, app, m),
-        None => {}
+    if let Some(m) = &app.modal {
+        modal(f, area, app, m);
     }
 }
 
@@ -132,7 +131,7 @@ fn modal(f: &mut Frame, area: Rect, app: &App, m: &Modal) {
                 t.red,
                 vec![
                     Line::from(Span::styled(format!("{}  {}  {}", short(&d.path), human_bytes(d.size), d.model), t.bold())),
-                    Line::from(Span::styled(format!("{}: to {why}, everything on it is erased.", screens::kind_label(d)), t.fg(t.red))),
+                    Line::from(Span::styled(format!("it holds {}. to {why}, everything on it is erased.", screens::kind_label(d)), t.fg(t.red))),
                     Line::default(),
                     Line::from(vec![
                         Span::styled("type windows to confirm:  ", t.text()),
@@ -144,7 +143,7 @@ fn modal(f: &mut Frame, area: Rect, app: &App, m: &Modal) {
             )
         }
     };
-    let r = centered(area, 64, lines.len() as u16 + 2);
+    let r = centered(area, 64, lines.len() as u16 + 3);
     f.render_widget(Clear, r);
     let block = Block::bordered()
         .border_type(BorderType::Plain)
@@ -152,5 +151,5 @@ fn modal(f: &mut Frame, area: Rect, app: &App, m: &Modal) {
         .padding(Padding::horizontal(1))
         .style(t.base())
         .title(Line::from(Span::styled(title, t.fg(color))));
-    f.render_widget(Paragraph::new(lines).block(block), r);
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }).block(block), r);
 }

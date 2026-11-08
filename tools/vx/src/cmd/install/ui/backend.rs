@@ -1,5 +1,6 @@
-//! One door to everything that reads the machine or does work: the real probe
-//! and engine, or the demo fakes (`--demo`).
+//! One door to everything that reads the machine or does work. The engine
+//! always does the work (`--demo` and `--dry-run` use its DryRun mode); the
+//! demo only fakes what a Mac can't provide: disks, the machine, install data.
 
 use super::super::engine::{self, Mode};
 use super::super::plan::{DiskInfo, Event, InstallData, Machine, Plan, Previous, Secret, Unlocked};
@@ -11,13 +12,21 @@ use std::sync::mpsc::Sender;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
-    /// Fake machine and disks, simulated progress. Runs anywhere.
+    /// Fake machine, disks and install data; the engine dry-runs. Runs anywhere.
     Demo,
     /// The real probe and engine, really (`Real`) or printing commands (`DryRun`).
     Engine(Mode),
 }
 
 impl Backend {
+    /// The engine's mode: the demo only ever dry-runs.
+    pub fn mode(self) -> Mode {
+        match self {
+            Backend::Demo => Mode::DryRun,
+            Backend::Engine(m) => m,
+        }
+    }
+
     pub fn is_demo(self) -> bool {
         self == Backend::Demo
     }
@@ -64,16 +73,11 @@ impl Backend {
     }
 
     pub fn unlock(self, prev: &Previous, password: Option<&Secret>) -> Result<Unlocked> {
-        match self {
-            Backend::Demo => demo::unlock(prev, password),
-            Backend::Engine(m) => engine::unlock_previous(prev, password, m),
-        }
+        engine::unlock_previous(prev, password, self.mode())
     }
 
     pub fn close_previous(self) {
-        if let Backend::Engine(m) = self {
-            let _ = engine::close_previous(m);
-        }
+        let _ = engine::close_previous(self.mode());
     }
 
     pub fn backup_targets(self, disks: &[DiskInfo], erased: &[String]) -> Vec<BackupTarget> {
@@ -84,16 +88,10 @@ impl Backend {
     }
 
     pub fn steps(self, plan: &Plan) -> Vec<String> {
-        match self {
-            Backend::Demo => demo::steps(plan),
-            Backend::Engine(_) => engine::steps(plan),
-        }
+        engine::steps(plan)
     }
 
     pub fn run(self, plan: &Plan, tx: Sender<Event>) -> Result<()> {
-        match self {
-            Backend::Demo => demo::run(plan, tx),
-            Backend::Engine(m) => engine::run(plan, tx, m),
-        }
+        engine::run(plan, tx, self.mode())
     }
 }

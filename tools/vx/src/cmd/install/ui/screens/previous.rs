@@ -35,12 +35,16 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         r.push(button_row(t, Field::SkipPrevious, "skip: carry nothing over"));
         if app.backend.is_demo() {
             r.push(Row::blank());
-            r.push(Row::muted(t, "demo: any password works except \"wrong\""));
+            r.push(Row::muted(t, "demo: any password works"));
         }
         return r;
     };
 
-    let mut r = vec![Row::heading(t, "carry over")];
+    let mut r = vec![
+        Row::muted(t, format!("mounted read-only: {} and {}", u.persistent.display(), u.home.display())),
+        Row::blank(),
+        Row::heading(t, "carry over"),
+    ];
     if u.available.is_empty() {
         r.push(Row::muted(t, "  nothing found to carry over"));
     }

@@ -45,6 +45,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
         .border_type(BorderType::Plain)
         .border_style(t.fg(t.border))
+        .padding(ratatui::widgets::Padding::horizontal(1))
         .title(Line::from(Span::styled(if p.scroll.is_some() { " log (scrolled: end follows) " } else { " log " }, t.muted())));
     let inner = block.inner(la);
     f.render_widget(block, la);

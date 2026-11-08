@@ -6,7 +6,7 @@
 //! /dev/disk/by-id and run lsblk. It compiles anywhere; off Linux the
 //! wrappers simply find nothing.
 
-use super::plan::{DiskInfo, DiskKind, Machine, PartInfo, Previous};
+use super::plan::{DataMode, DiskInfo, DiskKind, Machine, PartInfo, Plan, Previous};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -133,7 +133,7 @@ pub fn parse_lsblk(json: &str, by_id: &BTreeMap<String, String>) -> Result<Vec<D
         let partitions = children(d)
             .iter()
             .filter(|c| s(c, "type").as_deref() == Some("part"))
-            .map(|c| part_info(c))
+            .map(part_info)
             .collect();
         disks.push(DiskInfo {
             by_id: by_id.get(&path).cloned(),
@@ -237,6 +237,30 @@ pub fn previous(disks: &[DiskInfo]) -> Vec<Previous> {
                 .find(|p| eq(&p.fstype, "crypto_LUKS"))
                 .map(|p| Previous { disk: d.path.clone(), root_part: p.path.clone(), encrypted: true })
         })
+        .collect()
+}
+
+/// Disks the plan neither installs onto nor formats that still hold an old
+/// NixOS install (partlabels `disk-main-*`, or a btrfs labelled `nixos`):
+/// their names clash with the new install's, so the engine renames them
+/// (nothing is erased). Kernel paths, e.g. /dev/nvme2n1.
+pub fn clashing_old_installs(disks: &[DiskInfo], plan: &Plan) -> Vec<String> {
+    let mut used = vec![plan.system.device.as_str()];
+    for d in &plan.data {
+        if let DataMode::Format { device, .. } = &d.mode {
+            used.push(device);
+        }
+    }
+    let in_plan = |d: &DiskInfo| used.iter().any(|u| *u == d.path || d.by_id.as_deref() == Some(*u));
+    disks
+        .iter()
+        .filter(|d| d.kind != DiskKind::Installer && !in_plan(d))
+        .filter(|d| {
+            d.partitions.iter().any(|p| {
+                p.partlabel.as_deref().is_some_and(|l| l.starts_with("disk-main-")) || (eq(&p.fstype, "btrfs") && eq(&p.label, "nixos"))
+            })
+        })
+        .map(|d| d.path.clone())
         .collect()
 }
 
@@ -508,6 +532,41 @@ pub(crate) mod tests {
     fn finds_the_previous_install() {
         let p = previous(&fixture_disks());
         assert_eq!(p, vec![Previous { disk: "/dev/nvme0n1".into(), root_part: "/dev/nvme0n1p2".into(), encrypted: true }]);
+    }
+
+    #[test]
+    fn old_installs_left_in_the_pc() {
+        use super::super::plan::{DataDisk, HomePlan, Settings, SystemDisk};
+        let d = fixture_disks();
+        let plan = |device: &str, data: Vec<DataDisk>| Plan {
+            flake: "/tmp/x".into(),
+            host: "arc".into(),
+            system: SystemDisk { device: device.into(), encrypt: true, tpm: false, swap_gb: 0 },
+            data,
+            settings: Settings {
+                hostname: "arc".into(),
+                username: "vainnor".into(),
+                time_zone: "UTC".into(),
+                wallpaper: "eye".into(),
+                theme: "match".into(),
+            },
+            disk_password: None,
+            user_password: None,
+            previous: None,
+            carry: Default::default(),
+            home: HomePlan::Fresh,
+        };
+        // Installing onto the old disk (by-id): nothing left over.
+        assert!(clashing_old_installs(&d, &plan("/dev/disk/by-id/nvme-CT1000P310SSD8_24304A1B2C3D", vec![])).is_empty());
+        // Installing onto the Sabrent: the Crucial still holds disk-main-*.
+        assert_eq!(clashing_old_installs(&d, &plan("/dev/disk/by-id/ata-ST2000DM008-2UB102_ZFL4ABCD", vec![])), vec!["/dev/nvme0n1"]);
+        // ...unless it's formatted as a data drive.
+        let fmt = DataDisk {
+            name: "games".into(),
+            mount: "/home/vainnor/games".into(),
+            mode: DataMode::Format { device: "/dev/nvme0n1".into(), encrypt: true },
+        };
+        assert!(clashing_old_installs(&d, &plan("/dev/sda", vec![fmt])).is_empty());
     }
 
     #[test]

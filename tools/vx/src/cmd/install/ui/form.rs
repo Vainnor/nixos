@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn wraps_and_truncates() {
-        assert_eq!(wrap("one two three four", 9), vec!["one two", "three", "four"]);
+        assert_eq!(wrap("one two three four five", 10), vec!["one two", "three four", "five"]);
         assert_eq!(truncate("CT1000P310SSD8", 8), "CT1000P~");
         assert_eq!(pad("ab", 4), "ab  ");
         assert_eq!(Input { value: "pw".into(), masked: true }.shown(), "**");

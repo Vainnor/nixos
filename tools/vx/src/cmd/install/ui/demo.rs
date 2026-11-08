@@ -1,16 +1,12 @@
-//! `--demo`: a fake machine resembling the real PC, fake install data, and an
-//! install that only pretends (progress events on a timer). Nothing is read
-//! from or written to any disk.
+//! `--demo`: a fake machine and disks resembling the real PC and fake install
+//! data. Unlocking and installing go through the engine's DryRun (it only
+//! logs commands), so nothing is read from or written to any disk.
 
-use super::super::plan::{
-    Carry, DataMode, DiskInfo, DiskKind, Event, HomePlan, InstallData, Machine, Outcome, PartInfo, Plan, Previous, Secret,
-    Settings, StepState, Unlocked, WallpaperInfo, OLD_MOUNT, WORK_REPO,
-};
+use super::super::plan::{DiskInfo, DiskKind, InstallData, Machine, PartInfo, Settings, WallpaperInfo, WORK_REPO};
 use super::super::probe::{self, BackupTarget};
-use anyhow::{Result, bail};
-use std::collections::{BTreeMap, BTreeSet};
+use anyhow::Result;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -207,125 +203,7 @@ pub fn prepare_repo(update: bool) -> Result<PathBuf> {
     Ok(PathBuf::from(WORK_REPO))
 }
 
-/// Any passphrase works except an empty one and "wrong" (to try the retry).
-pub fn unlock(prev: &Previous, password: Option<&Secret>) -> Result<Unlocked> {
-    pause(1200);
-    if prev.encrypted && password.is_none_or(|p| p.0.is_empty() || p.0 == "wrong") {
-        bail!("no key available with this passphrase: check it and try again");
-    }
-    Ok(Unlocked {
-        previous: prev.clone(),
-        persistent: PathBuf::from(format!("{OLD_MOUNT}/persistent")),
-        home: PathBuf::from(format!("{OLD_MOUNT}/home")),
-        available: Carry::ALL.into_iter().collect(),
-        home_bytes: 312_400_000_000,
-        users: vec!["vainnor".into()],
-        swap_gb: 16,
-    })
-}
-
 pub fn backup_targets(disks: &[DiskInfo], erased: &[String]) -> Vec<BackupTarget> {
     pause(600);
     probe::backup_candidates(disks, erased).into_iter().map(|t| BackupTarget { free: Some(t.size * 7 / 10), ..t }).collect()
-}
-
-fn short(dev: &str) -> &str {
-    dev.rsplit('/').next().unwrap_or(dev)
-}
-
-pub fn steps(plan: &Plan) -> Vec<String> {
-    let mut s = vec![];
-    if let HomePlan::Backup { partition } = &plan.home {
-        s.push(format!("back up /home to {}", short(partition)));
-    }
-    s.push("write the disk choices into the repo".into());
-    if plan.home == HomePlan::Keep {
-        s.push("clear the old system (keeping /home)".into());
-    } else {
-        s.push(format!("partition {}", short(&plan.system.device)));
-    }
-    for d in &plan.data {
-        if let DataMode::Format { .. } = d.mode {
-            s.push(format!("format data drive {}", d.name));
-        }
-    }
-    if !plan.carry.is_empty() {
-        s.push("carry over state from the old install".into());
-    }
-    s.push("set the login password".into());
-    if !plan.carry.contains(&Carry::HostKey) {
-        s.push("create the ssh host key".into());
-    }
-    s.push("install nixos".into());
-    s.push("put the repo in ~/nixos".into());
-    if plan.system.tpm {
-        s.push("prepare tpm unlock".into());
-    }
-    s.push("finish".into());
-    s
-}
-
-/// Pretend to install: a few log lines per step. VX_DEMO_FAIL=1 fails the install step.
-pub fn run(plan: &Plan, tx: Sender<Event>) -> Result<()> {
-    let fail = std::env::var("VX_DEMO_FAIL").is_ok_and(|v| v == "1");
-    let send = |e: Event| tx.send(e).ok();
-    for (i, name) in steps(plan).iter().enumerate() {
-        send(Event::Step { index: i, state: StepState::Running });
-        let lines: Vec<String> = if name.starts_with("partition") {
-            vec![
-                format!("$ wipefs -a {}", plan.system.device),
-                "$ disko --mode destroy,format,mount /tmp/vx-install/nixos/modules/hosts/arc/_disko.nix".into(),
-                "creating partition table".into(),
-                "formatting ESP (vfat)".into(),
-                if plan.system.encrypt { "creating luks container cryptroot".into() } else { "no encryption".into() },
-                "creating btrfs subvolumes @nix @persistent @home @log @snapshots".into(),
-            ]
-        } else if name == "install nixos" {
-            let mut v = vec![format!("$ nixos-install --flake {}#{} --no-root-passwd --no-channel-copy", plan.flake.display(), plan.host)];
-            for p in ["linux-6.12.4", "mesa-25.0.1", "hyprland-0.47.2", "steam-1.0.0.82", "librewolf-134.0", "home-manager-generation"] {
-                v.push(format!("copying path '/nix/store/{}-{p}' from 'https://cache.nixos.org'...", "x".repeat(32)));
-            }
-            v.push("installing the boot loader...".into());
-            v
-        } else {
-            vec![format!("$ true  # {name}")]
-        };
-        for l in lines {
-            pause(180);
-            send(Event::Log(l));
-        }
-        pause(350);
-        if fail && name == "install nixos" {
-            let msg = "nixos-install exited with status 1".to_string();
-            send(Event::Log(format!("error: {msg}")));
-            send(Event::Step { index: i, state: StepState::Failed(msg.clone()) });
-            bail!("{msg}");
-        }
-        let state = if name == "prepare tpm unlock" && !plan.system.encrypt { StepState::Skipped } else { StepState::Done };
-        send(Event::Step { index: i, state });
-    }
-    let carried = plan.carry.contains(&Carry::HostKey);
-    let mut next = vec!["remove the usb stick and reboot; if windows starts, pick the nixos drive with f11.".to_string()];
-    if !plan.carry.contains(&Carry::SecureBoot) {
-        next.push("secure boot: in the bios, reset to setup mode (delete keys), then boot nixos once: it enrolls its keys. then turn secure boot on.".into());
-    }
-    if !carried {
-        next.push("secrets: on the mac run  vx secrets add-host <age key above>, push, then  vx switch  here.".into());
-    }
-    if !plan.carry.contains(&Carry::NetBird) {
-        next.push("netbird: sudo netbird up".into());
-    }
-    next.push("github: gh auth login (so git push works)".into());
-    send(Event::Done(Outcome {
-        age_key: "age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq".into(),
-        host_key_carried: carried,
-        next_steps: next,
-    }));
-    Ok(())
-}
-
-/// For tests: the carry set a fresh demo unlock offers.
-#[allow(dead_code)]
-pub fn all_carry() -> BTreeSet<Carry> {
-    Carry::ALL.into_iter().collect()
 }

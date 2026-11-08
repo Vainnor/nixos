@@ -48,15 +48,16 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
     };
     r.push(disks);
     r.push(Row::blank());
-    let note = if app.offline {
-        "off: --offline"
+    let lbl = if app.offline {
+        "use the copy on this usb (--offline)"
     } else if !m.online {
-        "off: no network"
+        "use the copy on this usb (no network)"
+    } else if app.fetch_latest {
+        "fetch the latest from github"
     } else {
-        "else the copy on this usb"
+        "use the copy on this usb"
     };
-    let lbl = if app.fetch_latest { "fetch the latest from github" } else { "use the copy on this usb" };
-    r.push(toggle_row(t, Field::FetchLatest, "repo", app.fetch_latest, &format!("{lbl}  ({note})")).disabled(app.offline || !m.online));
+    r.push(toggle_row(t, Field::FetchLatest, "repo", app.fetch_latest, lbl).disabled(app.offline || !m.online));
     r.push(Row::blank());
     r.push(button_row(t, Field::Start, "start").disabled(app.probe_error.is_some()));
     r

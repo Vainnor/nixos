@@ -30,6 +30,17 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
     if keep && let Some(d) = app.system_disk() {
         r.push(Row::colored(t.yellow, format!("  {}: system and /persistent replaced, /home and the store kept", short(&d.path))));
     }
+    if let Ok(plan) = app.build_plan() {
+        for d in probe::clashing_old_installs(&app.disks, &plan) {
+            let msg = format!(
+                "old nixos install on {} is left as is: its partition names clash with the new install; it will be renamed (nothing erased)",
+                short(&d)
+            );
+            for l in wrap(&msg, w.saturating_sub(3)) {
+                r.push(Row::colored(t.yellow, format!("  {l}")));
+            }
+        }
+    }
     r.push(Row::blank());
 
     if let Some(d) = app.system_disk() {
