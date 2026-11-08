@@ -285,7 +285,51 @@ fn render(a: &App, w: u16, h: u16) -> String {
     out
 }
 
+/// The same render as HTML with colours (target/screens/<name>.html), for reviewing the look.
+fn render_html(a: &App, w: u16, h: u16) -> String {
+    use ratatui::style::{Color, Modifier};
+    fn css(c: Color, default: &str) -> String {
+        match c {
+            Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+            Color::Reset => default.to_string(),
+            other => format!("{other}").to_lowercase(),
+        }
+    }
+    let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+    t.draw(|f| view::draw(f, a)).unwrap();
+    let buf = t.backend().buffer().clone();
+    let mut out = String::new();
+    for y in 0..h {
+        let mut x = 0;
+        while x < w {
+            let c = &buf[(x, y)];
+            let (fg, bg, bold) = (c.fg, c.bg, c.modifier.contains(Modifier::BOLD));
+            let mut run = String::new();
+            while x < w {
+                let d = &buf[(x, y)];
+                if d.fg != fg || d.bg != bg || d.modifier.contains(Modifier::BOLD) != bold {
+                    break;
+                }
+                run.push_str(&d.symbol().replace('&', "&amp;").replace('<', "&lt;"));
+                x += 1;
+            }
+            out.push_str(&format!(
+                "<span style=\"color:{};background:{}{}\">{run}</span>",
+                css(fg, "inherit"),
+                css(bg, "transparent"),
+                if bold { ";font-weight:700" } else { "" }
+            ));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 fn dump(name: &str, a: &mut App) {
+    let html = render_html(a, 120, 40);
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/screens");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{name}.html")), html).unwrap();
     a.fix_focus();
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/screens");
     std::fs::create_dir_all(&dir).unwrap();
