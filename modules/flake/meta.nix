@@ -18,9 +18,6 @@
     # GitHub repo (cloned into ~/nixos by the installer). Public is fine: no secrets live here.
     repoUrl = "https://github.com/vainnor/nixos";
 
-    # The installer only ever targets an NVMe disk of this model (the 1TB Crucial P310).
-    installDiskModel = "CT1000P310SSD8";
-
     # Where the repo is cloned on the PC (nh uses this).
     flakePath = "/home/vainnor/nixos";
 
