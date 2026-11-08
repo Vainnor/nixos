@@ -3,7 +3,9 @@
 Things decided but not done yet, or that need the real hardware first.
 
 ## After the first NixOS boot
-- [ ] **Mount the Windows data drives.** Seagate 2TB (`D:`) and Sabrent 1TB (`L:`) with the kernel's `ntfs3` driver, read-write or read-only (decide then). The Windows system drive (Sabrent 2TB, `C:`) stays untouched. Needs their UUIDs from `lsblk -f` on the PC.
+- [ ] **Mount the Windows data drives.** Done in the installer now: on the data drives screen, set Seagate 2TB (`D:`) and Sabrent 1TB (`L:`) to "mount as it is" (`ntfs3`, read-write or read-only) with a path like `/mnt/d`. The Windows system drive (Sabrent 2TB, `C:`) stays untouched. Already installed? Add them as `"mode": "mount"` entries in `modules/hosts/arc/disks.json` (UUIDs from `lsblk -f`).
+- [ ] **Push the installer's commit** (`modules/hosts/arc/disks.json` and the `meta.nix` edits) from `~/nixos` after `gh auth login`.
+- [ ] **Test the new installer on the real PC** before trusting it with `/home`: the cage window on the 7900 XTX, TPM enrollment on the first Secure Boot boot (`systemctl status tpm-first-boot-enroll`), an encrypted data drive unlocking at boot, and a "keep /home" reinstall.
 - [ ] **BEACN Studio on Linux.** Try [beacn-utility](https://github.com/beacn-on-linux/beacn-utility) (not in nixpkgs yet) to control the Studio's mixes and mic settings from Linux. If it works, package it here with its udev rules.
 - [ ] **LibreWolf data.** Export Sidebery and Stylus on the Mac and import them on the PC (README > After installing > LibreWolf).
 - [ ] Set `meta.audioOutput` (`vx audio devices`) and `meta.replayMonitor` (`gpu-screen-recorder --list-monitors`, the ultrawide).

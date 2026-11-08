@@ -81,8 +81,9 @@ Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 
 ## Three things to know before changing anything
 
-1. **The installer only ever erases one disk.** It finds the Crucial P310 by model, refuses anything with
-   Windows or NTFS on it, and waits for you to type `YES`. The Windows drives are never named anywhere.
+1. **The installer only erases the drives you pick.** It lists every disk, never offers the USB stick,
+   asks twice for anything with Windows on it, shows in red what will be erased, and waits for you to type
+   `YES`. The drives it set up are written to `modules/hosts/arc/disks.json`; nothing else names a disk.
 2. **`/` is wiped on every boot.** Anything not declared here or listed in
    `modules/system/impermanence.nix` is gone after a reboot. `vx persist-check` shows what would be lost.
 3. **The repo is public; secrets are not.** They're sops-encrypted in `secrets/`, and CI fails on anything
@@ -90,28 +91,57 @@ Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 
 ## Install
 
-Before you start: turn off Fast Startup in Windows and Secure Boot in the BIOS. Secure Boot can be turned back on later with lanzaboote.
+**1. Get the installer onto a USB stick.** Build the custom ISO with `vx iso` (x86_64 Linux; WSL works),
+or `nix build .#nixosConfigurations.installer.config.system.build.isoImage`. Write it to a stick with
+`vx iso --flash /dev/sdX` (or any image writer). Any other NixOS ISO works too, see the end of this section.
 
-Boot any NixOS installer USB. Connect Ethernet, or run `nmtui` for Wi-Fi. Then run:
+**2. BIOS.** Boot in UEFI mode. Turn Secure Boot **off**, only so the installer USB boots; it gets turned on
+again after the install (see Secure Boot + TPM below). In Windows, turn off Fast Startup first.
 
-```
-sudo nix --extra-experimental-features 'nix-command flakes' run github:vainnor/nixos
-```
+**3. Boot the stick.** The installer starts by itself, full screen. Plug in Ethernet before it starts; for
+Wi-Fi, quit it, run `nmtui`, then `vx-installer` to start it again. If the graphics don't come up it runs on
+the plain console instead. Nothing is erased until the review screen.
 
-The installer:
-- finds the 1TB Crucial P310 by its model name;
-- refuses to continue if it finds Windows/NTFS partitions on it, or if it's the USB stick;
-- shows the disk and waits for you to type `YES`;
-- asks for the disk-encryption password and your login password, then installs.
+The screens:
+- **welcome**: checks root, UEFI, network, Secure Boot / Setup Mode and the TPM, and offers to fetch the
+  latest repo from GitHub (default) or install the copy on the stick.
+- **previous install**: if a disk holds a NixOS install made by this flake, unlock it with its disk password
+  and choose what to **carry over** into the new install (see below) and what happens to `/home`: **fresh**
+  (empty), **keep** (reinstall onto the same disk without reformatting it: only the system and
+  `/persistent` are replaced; encryption and swap stay as they were) or **back up** (copied to a partition
+  that isn't being erased, before anything is wiped).
+- **system drive**: the disk NixOS goes on. Disks with Windows on them need an extra typed confirmation.
+- **data drives**: any other disk can be **formatted** as an extra btrfs drive (optionally encrypted; it
+  unlocks at boot with a key file kept on `/persistent`) or **mounted as it is**, like the Windows data
+  drives through `ntfs3` (read-write or read-only). Each gets a name and a mount path. A missing data
+  drive never stops the boot.
+- **options**: encryption, TPM auto-unlock, swap file size (zram is always on), hostname, username, time
+  zone, theme and wallpaper.
+- **passwords**: the disk passphrase and your login password (or the carried-over one).
+- **review**: everything you picked, with what will be **erased** in red. Type `YES`.
+- **progress**: each step with a live log, then a summary with what to do next, and reboot or a shell.
 
-When it finishes, reboot. Choose the NixOS drive with F11 if Windows starts instead. Log in, then run `sudo netbird up`, and `gh auth login` so `git push` works (the repo is cloned over HTTPS; choose HTTPS and "Login with a web browser").
+**Carry-over** copies state from the previous install's `/persistent`, so the new system starts where the
+old one left off. Each item can be left out:
+- the SSH host key: it's also the key that opens `secrets/`, so secrets work on the first boot;
+- the NetBird login (same peer, same address);
+- your Secure Boot keys: if they are still enrolled in the firmware, there's no Setup Mode step;
+- the login password;
+- Bluetooth pairings and saved Wi-Fi;
+- everything else in `/persistent` (machine id, fan curves, VM state, ...).
 
-If you'd rather install from a clone of the repo, clone it to `~/nixos` and run
-`sudo nix --extra-experimental-features 'nix-command flakes' run ~/nixos#install`; it's the same installer.
+**4. Commit what the installer wrote.** It edits its copy of the repo (now `~/nixos` on the PC):
+`modules/hosts/arc/disks.json` (the drives) and `modules/flake/meta.nix` (username, time zone, theme,
+wallpaper), and commits them there. Push that commit after logging in (`gh auth login` first): a clone without
+`disks.json` builds the default layout (one encrypted disk, no data drives), not yours.
 
-**Optional custom ISO**: the installer is preloaded, so you just run `sudo install-nixos`. It also
-has `vx`, so from a clone in `~/nixos`, `vx install` does the same. Build it with `vx iso`, or
-`nix build .#nixosConfigurations.installer.config.system.build.isoImage` (on x86_64 Linux; WSL works).
+**5. First boot.** Pick the NixOS drive with F11 if Windows starts. Type the disk passphrase. On this first
+boot your own Secure Boot keys are created (unless they were carried over) and the boot files are signed.
+Log in, then run `sudo netbird up` (skip it if the login was carried over). For secrets, see below.
+
+**Without the custom ISO**: from any NixOS installer, connect to the network and run
+`sudo nix --extra-experimental-features 'nix-command flakes' run github:vainnor/nixos`. It's the same
+installer, just on the console. From a clone of the repo: `sudo nix run ~/nixos#install`, or `vx install`.
 
 ## Impermanence
 
@@ -135,10 +165,12 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 <details>
 <summary><b>Secure Boot + TPM unlock</b></summary>
 
-1. On first boot, your own Secure Boot keys are created in `/var/lib/sbctl` (kept on `/persistent`).
+1. On first boot, your own Secure Boot keys are created in `/var/lib/sbctl` (kept on `/persistent`) and the boot files are signed with them.
 2. Reboot into the BIOS. Go to *Security > Secure Boot*, set the mode to **Custom**, then **delete all keys** (this is Setup Mode). Save and reboot. systemd-boot enrolls your keys plus Microsoft's; Windows and the GPU's option ROM need Microsoft's.
 3. Back in the BIOS, turn Secure Boot **on**. Then run `vx secureboot`. It should show *Secure Boot: enabled*.
-4. Run `vx tpm enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
+4. If you chose TPM unlock in the installer, that first boot with Secure Boot on enrolls the TPM by itself (`tpm-first-boot-enroll`, then it removes its one-time key). Otherwise, or to redo it, run `vx tpm enroll`. From then on the disk unlocks automatically as long as the Secure Boot state is unchanged. Your passphrase still works as a fallback.
+
+Carried-over Secure Boot keys that are still enrolled in the firmware: the boot files were already signed during the install, so skip step 2; just turn Secure Boot on (step 3), and step 4 follows by itself.
 
 </details>
 
@@ -146,7 +178,7 @@ mkpasswd -m yescrypt | sudo tee /persistent/passwords/vainnor
 <summary><b>Secrets (sops)</b></summary>
 
 `secrets/secrets.yaml` is encrypted (it holds the Twitch stream key and the StreamElements ID and token). Only the recipients in `.sops.yaml` can open it.
-1. The installer prints the PC's age key, and also saves it in `~/nixos/HOST_AGE_KEY.txt`. `vx secrets host` shows it again.
+1. If the SSH host key was carried over, secrets already work; skip this. Otherwise the installer's summary shows the PC's new age key, and `vx secrets host` shows it again.
 2. On the Mac, run `vx secrets add-host age1...`. This re-encrypts the file for the PC and sets `meta.secretsReady = true`.
 3. Run `vx secrets edit` to fill in real values, then `vx commit "..."` and `vx deploy`.
 
@@ -297,7 +329,7 @@ on the PC and `~/Programing/nixos` on the Mac; `--repo` (or `VX_REPO`) points it
 | `vx try <pkg>` / `vx search <words>` | Run a package once without installing it / search the pinned nixpkgs |
 | `vx persist-check` | Find files on `/` that would be lost at reboot, and how to keep them |
 | `vx password` | Change your login password |
-| `vx iso` | Build the custom installer ISO |
+| `vx iso` / `vx iso --flash <device>` | Build the custom installer ISO / and write it to a USB stick |
 | `vx secrets edit` | Edit the encrypted secrets (on the Mac) |
 | `vx secureboot` / `vx tpm enroll` | Check Secure Boot / enroll the TPM unlock |
 | `vx windows` | Start the Windows VM with the GPU passed through |
@@ -417,6 +449,6 @@ Files and folders whose path contains `/_` (like `hosts/arc/_disko.nix`) aren't 
 
 ## If the drive dies
 
-Snapshots live on the same disk, so they won't help. Install again (`nix run github:vainnor/nixos`),
+Snapshots live on the same disk, so they won't help. Install again (the custom ISO, or `nix run github:vainnor/nixos`),
 add the new host key with `vx secrets add-host`, then `vx restore --restic /home/vainnor` (and anything from
 `/persistent` you need) and copy it back from `/tmp/restore`. Without the Mac's age key, nothing in `secrets/` can be decrypted.

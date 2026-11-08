@@ -104,8 +104,12 @@ pub enum Cmd {
     },
     /// Change your login password (stored on /persistent; applies at next login)
     Password,
-    /// Build the custom installer ISO (x86_64 Linux)
-    Iso,
+    /// Build the custom installer ISO (x86_64 Linux); --flash writes it to a USB stick
+    Iso {
+        /// USB stick to write it to, e.g. /dev/sdb (erased; asks first)
+        #[arg(long, value_name = "DEVICE")]
+        flash: Option<String>,
+    },
     /// Boot arc's config in a VM window (any Linux with Nix; login vainnor / preview)
     Preview {
         /// Graphics: soft (no GL, for WSL), gl, or auto
@@ -212,7 +216,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::CachePush => cache_push(ctx),
         Cmd::New { lang, dir } => new_project(ctx, &lang, &dir),
         Cmd::Password => password(ctx),
-        Cmd::Iso => iso(ctx),
+        Cmd::Iso { flash } => iso(ctx, flash.as_deref()),
         Cmd::Preview { gpu, reset } => preview(ctx, gpu, reset),
         Cmd::Mac(m) => {
             ctx.need(Host::Mac)?;
@@ -527,18 +531,81 @@ fn password(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
-fn iso(ctx: &Ctx) -> Result<()> {
+fn iso(ctx: &Ctx, flash: Option<&str>) -> Result<()> {
     ctx.need(Host::Arc)?;
     let f = flake(ctx, "nixosConfigurations.installer.config.system.build.isoImage")?;
     ctx.run(ctx.nix().args(["build", &f]))?;
+    let mut image = None;
     for e in std::fs::read_dir(ctx.repo.join("result/iso"))?.filter_map(|e| e.ok()) {
         let p = e.path();
         if p.extension().is_some_and(|x| x == "iso") {
             let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             ui::ok(&format!("{} ({:.1} GiB)", p.display(), size as f64 / (1u64 << 30) as f64));
+            image = Some(p);
         }
     }
+    let Some(dev) = flash else {
+        ui::dim("write it to a usb stick: vx iso --flash /dev/sdX (lsblk shows which)");
+        return Ok(());
+    };
+    let image = image.context("the build made no .iso")?;
+    flash_usb(ctx, &image, dev)
+}
+
+/// Write the ISO to a USB stick, refusing anything that isn't a removable/USB whole disk.
+fn flash_usb(ctx: &Ctx, image: &std::path::Path, dev: &str) -> Result<()> {
+    let info = ctx.output(Command::new("lsblk").args(["-dnbo", "TYPE,TRAN,RM,SIZE,MODEL", dev]))?;
+    let (ok, why) = flash_target_ok(&info);
+    if !ok {
+        bail!("{dev} {why}; pick the usb stick from `lsblk -d -o NAME,SIZE,TRAN,MODEL`");
+    }
+    let mounted = ctx.output(Command::new("lsblk").args(["-nro", "MOUNTPOINTS", dev]))?;
+    if mounted.lines().any(|l| l.trim() == "/" || l.trim().starts_with("/nix") || l.trim().starts_with("/boot")) {
+        bail!("{dev} holds the running system; refusing");
+    }
+    let _ = ctx.run(Command::new("lsblk").args(["-o", "NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINTS", dev]));
+    ui::warn(&format!("everything on {dev} will be erased"));
+    print!("type the device name ({dev}) to continue: ");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let mut s = String::new();
+    std::io::stdin().read_line(&mut s)?;
+    if s.trim() != dev {
+        bail!("not confirmed; nothing was written");
+    }
+    // Unmount anything the desktop auto-mounted from the stick.
+    for m in mounted.lines().map(str::trim).filter(|m| !m.is_empty()) {
+        let _ = ctx.run(ctx.sudo("umount").arg(m));
+    }
+    ctx.run(ctx.sudo("dd").arg(format!("if={}", image.display())).arg(format!("of={dev}")).args([
+        "bs=4M",
+        "conv=fsync",
+        "oflag=direct",
+        "status=progress",
+    ]))?;
+    ui::ok(&format!("{dev} is ready: boot it in uefi mode (secure boot off), the installer starts by itself"));
     Ok(())
+}
+
+/// `lsblk -dnbo TYPE,TRAN,RM,SIZE,MODEL` output -> (ok, reason when not).
+fn flash_target_ok(info: &str) -> (bool, &'static str) {
+    let f: Vec<&str> = info.split_whitespace().collect();
+    match f.as_slice() {
+        [ty, ..] if *ty != "disk" => (false, "is not a whole disk"),
+        [_, tran, rm, size, ..] => {
+            let usb = *tran == "usb" || *rm == "1";
+            let size: u64 = size.parse().unwrap_or(0);
+            if !usb {
+                (false, "is not a usb / removable drive")
+            } else if size > 256 * (1u64 << 30) {
+                (false, "is bigger than 256 GiB (not a usb stick?)")
+            } else {
+                (true, "")
+            }
+        }
+        // No TRAN column (some USB readers): only RM is trustworthy then.
+        [_, rm, size] => flash_target_ok(&format!("disk none {rm} {size}")),
+        _ => (false, "was not found"),
+    }
 }
 
 fn preview(ctx: &Ctx, gpu: Gpu, reset: bool) -> Result<()> {
@@ -654,5 +721,20 @@ mod tests {
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].0, "nixpkgs");
         assert!(c[0].1.ends_with("(aaaaaaa -> bbbbbbb)"), "{}", c[0].1);
+    }
+}
+
+#[cfg(test)]
+mod flash_tests {
+    use super::flash_target_ok;
+
+    #[test]
+    fn only_usb_sticks() {
+        assert!(flash_target_ok("disk usb 0 32017047552 SanDisk_3.2Gen1").0);
+        assert!(flash_target_ok("disk sata 1 15931539456 Card_Reader").0);
+        assert!(!flash_target_ok("disk nvme 0 1000204886016 CT1000P310SSD8").0);
+        assert!(!flash_target_ok("part usb 0 32017047552").0);
+        assert!(!flash_target_ok("disk usb 0 2000398934016 Seagate_Expansion").0);
+        assert!(!flash_target_ok("").0);
     }
 }

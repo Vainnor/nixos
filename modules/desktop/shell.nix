@@ -74,31 +74,11 @@ in
       # so the picker can preview and recolour the shell before the rebuild.
       wallpapers = pkgs.writeText "vshell-wallpapers.json" (
         builtins.toJSON (
-          map (
-            name:
-            let
-              p = import ../../assets/themes (
-                meta
-                // {
-                  wallpaper = name;
-                  theme = "match";
-                }
-              );
-            in
-            {
-              inherit name;
-              wide = "${p.wallpapers.wide}";
-              uhd = "${p.wallpapers.uhd}";
-              colors = p.scheme // {
-                border = if p.extra.border != null then p.extra.border else p.scheme.base02;
-                accent2 = if p.extra.accent2 != null then p.extra.accent2 else p.scheme.base0F;
-              };
-            }
-          ) (
-            builtins.filter (n: builtins.pathExists (../../assets/wallpapers + "/${n}/wide.png")) (
-              builtins.attrNames (builtins.readDir ../../assets/wallpapers)
-            )
-          )
+          map (w: {
+            inherit (w) name colors;
+            wide = "${w.wide}";
+            uhd = "${w.uhd}";
+          }) (import ../../assets/themes/wallpapers.nix meta)
         )
       );
       ipc = "vshell ipc call";
