@@ -1,39 +1,16 @@
-# The PC ("arc" on NetBird). This file only picks features and sets what is
-# unique to this machine; everything else lives in the feature files.
-{ inputs, config, ... }:
+# The PC ("arc" on NetBird). host.json picks its aspects and settings, and
+# flake/hosts.nix builds it like any other host. This folder holds only what
+# arc has and no other machine: its monitors (here), fans (fans.nix), GPU
+# passthrough (vfio.nix), hardware (_hardware.nix) and `vx preview`
+# (preview.nix). All of them go into flake.modules.nixos.arc, which only arc
+# includes.
+{ config, ... }:
 let
-  inherit (config.flake.modules) nixos;
   user = config.meta.username;
 in
 {
-  flake.nixosConfigurations.arc = inputs.nixpkgs.lib.nixosSystem {
-    modules = with nixos; [
-      base
-      desktop
-      gaming
-      dev
-      privacy
-      streaming
-      vm
-      arc
-    ];
-  };
-
   flake.modules.nixos.arc = {
-    imports = [
-      inputs.disko.nixosModules.disko
-      (import ./_disko.nix { inherit inputs user; }) # reads ./disks.json, written by the installer
-      ./_hardware.nix
-    ];
-
-    networking.hostName = "arc";
-
-    # Set once at install time; never bump it casually (it is NOT the NixOS version you run).
-    system.stateVersion = "26.11";
-
     home-manager.users.${user} = {
-      home.stateVersion = "26.11";
-
       # Matched by EDID model so connector names (DP-1, ...) don't matter.
       # Samsung on the left, ASUS ultrawide on the right as primary. No negative
       # coordinates (they break XWayland input). Verify names with `wlr-randr`.

@@ -3,16 +3,18 @@
 # OBS captures each one separately (see streaming/obs.nix for the track map).
 # "System" is the default output, so anything you don't route lands there;
 # move apps to Game/Chat/Music/Browser in pwvucontrol (it remembers per app).
-# Needs meta.audioOutput (`vx audio devices` lists the names).
-# Mic cleanup goes through EasyEffects.
-{ config, ... }:
-let
-  output = config.meta.audioOutput;
-in
+# Needs audioOutput in the host's host.json (`vx audio devices` lists the names).
+# Mic cleanup goes through EasyEffects. Any output device works.
 {
   flake.modules.nixos.desktop =
-    { lib, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
+      output = config.vx.host.audioOutput;
       channel = name: priority: {
         name = "libpipewire-module-loopback";
         args = {
@@ -50,7 +52,7 @@ in
         pulse.enable = true;
         wireplumber.enable = true;
         extraConfig.pipewire."60-virtual-channels"."context.modules" = [
-          # System only becomes the default once meta.audioOutput is set;
+          # System only becomes the default once audioOutput is set;
           # until then it would loop back into itself.
           (channel "System" (if output != null then 2500 else 500))
           (channel "Game" 500)
@@ -69,7 +71,7 @@ in
     { pkgs, ... }:
     {
       # Volume keys and the on-screen level: the shell (desktop/shell.nix). It
-      # turns the real device (meta.audioOutput), so every channel follows.
+      # turns the real device (audioOutput in host.json), so every channel follows.
       services.easyeffects.enable = true;
       home.packages = with pkgs; [
         pwvucontrol

@@ -1,15 +1,16 @@
 # VMs: libvirt + virt-manager for everyday VMs (Alpine to learn OpenRC, etc.)
-# and a Windows 11 VM that takes over the RX 7900 XTX ("single-GPU passthrough").
+# and, on hosts with vx.host.vfio set (only arc: hosts/arc/vfio.nix), a
+# Windows 11 VM that takes over the graphics card ("single-GPU passthrough").
 #
-# How the Windows VM works:
+# How the Windows VM works (arc: RX 7900 XTX, 8-core Ryzen):
 #   `vx windows` starts it. A libvirt hook stops the Mango session, hands the
 #   GPU (and its HDMI/DP audio) to the VM, reserves 16 GB of hugepages, and the
 #   VM drives your monitors directly at near-native speed. The USB devices in
-#   meta.vfio.usb (keyboard, mouse, BEACN, headset, webcam) move into the VM.
+#   vx.host.vfio.usb (keyboard, mouse, BEACN, headset, webcam) move into the VM.
 #   Shut Windows down and everything comes back to Linux at the login screen.
 #
-#   CPU: 7 of 8 cores (14 threads) pinned to the VM; core 0 stays with Linux.
-#   Disk: a raw image on a no-copy-on-write folder, or (meta.vfio.windowsNvme)
+#   CPU: 7 of arc's 8 cores (14 threads) pinned to the VM; core 0 stays with Linux.
+#   Disk: a raw image on a no-copy-on-write folder, or (vx.host.vfio.windowsNvme)
 #   the whole Windows NVMe so the VM boots your real Windows install.
 #
 # "win11-lite" is a second, everyday Windows VM for light Windows-only apps:
@@ -19,7 +20,7 @@
 #   software renderer handling Direct3D: fine for office tools, utilities and
 #   2D apps; not for games or heavy 3D. Clipboard sharing and auto-resize come
 #   from the SPICE agent, which the first-login script installs.
-#   It's always available; it doesn't need meta.vfio.
+#   Every host with the vm aspect gets it; it doesn't need vx.host.vfio.
 #
 # Both install hands-off from a new disk image: an answer file on an extra CD
 # gives Windows 11 Pro with a local account and privacy settings turned down
@@ -30,13 +31,23 @@
 { config, ... }:
 let
   inherit (config) meta;
-  vfio = meta.vfio;
   vmName = "win11";
 in
 {
   flake.modules.nixos.vm =
-    { lib, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
+      # GPU passthrough settings: only arc has them (hosts/arc/vfio.nix); null
+      # on every other host, which then gets libvirt and win11-lite only.
+      inherit (config.vx.host) vfio;
+      # Intel and AMD name their IOMMU and SMT-topology bits differently.
+      intelCpu = config.hardware.cpu.intel.updateMicrocode;
+      topoext = lib.optionalString (!intelCpu) "<feature policy=\"require\" name=\"topoext\"/>";
       pci =
         addr:
         let
@@ -49,7 +60,7 @@ in
         <hostdev mode="subsystem" type="pci" managed="no">
           <source>${pci addr}</source>
         </hostdev>'';
-      # The GPU with its video BIOS from a file (meta.vfio.gpuRom): without it
+      # The GPU with its video BIOS from a file (vx.host.vfio.gpuRom): without it
       # the VM's firmware can't drive the card and the screens stay black.
       # GPU and its audio as functions .0 and .1 of one slot, like on the real
       # card: AMD's driver stops with code 43 when they're separate devices.
@@ -180,7 +191,7 @@ in
           <cpu mode="host-passthrough" check="none" migratable="off">
             <topology sockets="1" dies="1" clusters="1" cores="7" threads="2"/>
             <cache mode="passthrough"/>
-            <feature policy="require" name="topoext"/>
+            ${topoext}
           </cpu>
           <devices>
             ${commonDevices}
@@ -215,7 +226,7 @@ in
           <cpu mode="host-passthrough" check="none" migratable="off">
             <topology sockets="1" dies="1" clusters="1" cores="4" threads="2"/>
             <cache mode="passthrough"/>
-            <feature policy="require" name="topoext"/>
+            ${topoext}
           </cpu>
           <devices>
             ${commonDevices}
@@ -346,7 +357,7 @@ in
             fi
             modprobe vfio-pci
             touch ${used}
-            # Card reserved from boot (meta.vfio.reserveGpu): the desktop runs
+            # Card reserved from boot (reserveGpu in vfio.nix): the desktop runs
             # on the CPU's graphics and stays up. Otherwise take the card from
             # Linux, which means stopping the desktop on it.
             if [ "$(basename "$(readlink /sys/bus/pci/devices/${vfio.gpu}/driver 2>/dev/null)")" != vfio-pci ]; then
@@ -388,13 +399,15 @@ in
         hooks.qemu = lib.mkIf (vfio != null) { gpu-passthrough = hook; };
       };
       programs.virt-manager.enable = true;
-      environment.systemPackages = with pkgs; [
-        pciutils # lspci
-        usbutils # lsusb
-        qemu-utils # qemu-img
-        virt-viewer # window for win11-lite
-      ]
-      ++ lib.optional reserve gpuLinux;
+      environment.systemPackages =
+        with pkgs;
+        [
+          pciutils # lspci
+          usbutils # lsusb
+          qemu-utils # qemu-img
+          virt-viewer # window for win11-lite
+        ]
+        ++ lib.optional reserve gpuLinux;
       users.users.${meta.username}.extraGroups = [
         "libvirtd"
         "kvm"
@@ -402,7 +415,7 @@ in
       networking.firewall.trustedInterfaces = [ "virbr0" ]; # DHCP/DNS for VMs
 
       boot.kernelParams = [
-        "amd_iommu=on"
+        (if intelCpu then "intel_iommu=on" else "amd_iommu=on")
         "iommu=pt"
       ]
       ++ lib.optional reserve "vfio-pci.ids=${vfio.gpuAudioId}"; # the card's audio, before the sound driver
@@ -412,17 +425,13 @@ in
       + lib.optionalString reserve ''
         install amdgpu ${claimGpu} $CMDLINE_OPTS
       '';
-      # amdgpu in the initrd for the boot splash, unless the card is reserved
-      # (then vfio-pci has to get to it first).
-      boot.initrd.kernelModules =
-        if reserve then
-          [
-            "vfio_pci"
-            "vfio"
-            "vfio_iommu_type1"
-          ]
-        else
-          [ "amdgpu" ];
+      # A reserved card goes to vfio-pci before any GPU driver can take it
+      # (amdgpu for the boot splash otherwise comes from system/gpu.nix).
+      boot.initrd.kernelModules = lib.mkIf reserve [
+        "vfio_pci"
+        "vfio"
+        "vfio_iommu_type1"
+      ];
 
       environment.etc = {
         "libvirt-templates/${liteName}.xml".source = liteXml;
@@ -450,7 +459,7 @@ in
               ]
               ++ lib.optional (vfio.windowsNvme or null != null) vfio.windowsNvme
             );
-        message = "meta.vfio PCI addresses must look like 0000:03:00.0 (see `vx vm gpu`).";
+        message = "vx.host.vfio PCI addresses must look like 0000:03:00.0 (see `vx vm gpu`).";
       };
     };
 }

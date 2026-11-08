@@ -29,15 +29,19 @@ everything, on both machines; `vx` on its own lists it all (see [Day to day](#da
 |---|---|
 | `base` | systemd-boot via lanzaboote, LUKS + TPM, impermanence, NetBird, SSH (NetBird only), sops, fish, hourly snapshots, restic, USBGuard, Prometheus exporters |
 | `desktop` | Mango, greetd, vshell (our own Quickshell shell: bar, launcher with apps, clipboard, emoji, calculator and files, notifications, control center, volume OSD, power menu, lock screen), Plymouth, night light, PipeWire channels, Stylix, 1Password, Thunar, Cider, Vesktop, TeamSpeak |
-| `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, LACT (GPU fans), CoolerControl (CPU and case fans), instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
+| `gaming` | Steam + Proton-GE, gamescope, gamemode, MangoHud, instant replay, Sunshine, scx_lavd, Xbox/PlayStation controllers |
 | `streaming` | OBS seeded with the Vainnor overlays: a profile, 3 themed scene collections, BEACN-style audio tracks, global hotkeys, an EasyEffects mic chain, Chatterino |
 | `dev` | Zed, vis, git signed through 1Password, direnv + nix-direnv, nix-ld, rootless Docker, kubectl, k9s, OpenTofu, Ansible, per-project toolchains for Python, TS/JS, Java, Go, PHP, Rust and C/C++ |
-| `vm` | libvirt: `win11` with the 7900 XTX passed through, `win11-lite` in a window, WinApps |
+| `vm` | libvirt: `win11-lite` in a window, WinApps; on arc also `win11` with the 7900 XTX passed through |
 | `privacy` | i2pd, and a LibreWolf profile that only talks through it |
 | `browser` | LibreWolf with Sidebery (vertical tabs), Stylus and 1Password, the tab strip hidden, square corners, about: pages in the system palette (on the Mac too) |
 
-Shared values (user, theme, wallpaper, monitors, audio output, VFIO addresses) live in
-`modules/flake/meta.nix`. **Change `theme` there and everything re-themes.** The look is flat
+The graphics driver follows each host's `gpu` (`amd`: amdgpu, VA-API and LACT for the GPU fans;
+`nvidia`; `intel`; `none`). arc also has CoolerControl for its CPU and case fans.
+
+Shared values (user, theme, wallpaper) live in `modules/flake/meta.nix`; what differs per machine
+(features, GPU, main monitor, audio output) lives in its `modules/hosts/<name>/host.json`.
+**Change `theme` in meta.nix and everything re-themes.** The look is flat
 and square everywhere (no rounded corners, shadows or blur, lowercase text labels), and the colours
 come from the wallpaper (see [Wallpapers](#wallpapers)).
 
@@ -83,7 +87,8 @@ Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 
 1. **The installer only erases the drives you pick.** It lists every disk, never offers the USB stick,
    asks twice for anything with Windows on it, shows in red what will be erased, and waits for you to type
-   `YES`. The drives it set up are written to `modules/hosts/arc/disks.json`; nothing else names a disk.
+   `YES`. The drives it set up are written to `modules/hosts/<name>/disks.json` (the machine's own
+   folder); nothing else names a disk.
 2. **`/` is wiped on every boot.** Anything not declared here or listed in
    `modules/system/impermanence.nix` is gone after a reboot. `vx persist-check` shows what would be lost.
 3. **The repo is public; secrets are not.** They're sops-encrypted in `secrets/`, and CI fails on anything
@@ -105,6 +110,8 @@ the plain console instead. Nothing is erased until the review screen.
 The screens:
 - **welcome**: checks root, UEFI, network, Secure Boot / Setup Mode and the TPM, and offers to fetch the
   latest repo from GitHub (default) or install the copy on the stick.
+- **machine**: reinstall a machine that's already in the repo (arc), or set up a **new machine** (see
+  [Another PC](#another-pc)).
 - **previous install**: if a disk holds a NixOS install made by this flake, unlock it with its disk password
   and choose what to **carry over** into the new install (see below) and what happens to `/home`: **fresh**
   (empty), **keep** (reinstall onto the same disk without reformatting it: only the system and
@@ -130,10 +137,12 @@ old one left off. Each item can be left out:
 - Bluetooth pairings and saved Wi-Fi;
 - everything else in `/persistent` (machine id, fan curves, VM state, ...).
 
-**4. Commit what the installer wrote.** It edits its copy of the repo (now `~/nixos` on the PC):
-`modules/hosts/arc/disks.json` (the drives) and `modules/flake/meta.nix` (username, time zone, theme,
-wallpaper), and commits them there. Push that commit after logging in (`gh auth login` first): a clone without
-`disks.json` builds the default layout (one encrypted disk, no data drives), not yours.
+**4. The commit.** The installer edits its copy of the repo (now `~/nixos` on the PC):
+`modules/hosts/<name>/disks.json` (the drives), the machine's `host.json` and `_hardware.nix` for a new
+machine, and `modules/flake/meta.nix` (username, time zone, theme, wallpaper). It commits them and pushes
+to GitHub (you log in with a code on your phone). Without a network to GitHub it only commits; push later
+with `vx sync`, because a clone without `disks.json` builds the default layout (one encrypted disk, no data
+drives), not yours.
 
 **5. First boot.** Pick the NixOS drive with F11 if Windows starts. Type the disk passphrase. On this first
 boot your own Secure Boot keys are created (unless they were carried over) and the boot files are signed.
@@ -142,6 +151,50 @@ Log in, then run `sudo netbird up` (skip it if the login was carried over). For 
 **Without the custom ISO**: from any NixOS installer, connect to the network and run
 `sudo nix --extra-experimental-features 'nix-command flakes' run github:vainnor/nixos`. It's the same
 installer, just on the console. From a clone of the repo: `sudo nix run ~/nixos#install`, or `vx install`.
+
+## Another PC
+
+The same config installs onto any x86_64 PC, and arc's files are never touched by it.
+
+1. Boot the installer stick on the new PC (step 1 to 3 above).
+2. On the **machine** screen choose **new machine** and give it a name (lowercase letters, digits and `-`,
+   e.g. `forge`).
+3. Pick its **features**: desktop, dev and privacy are on by default; gaming, streaming and vm are off.
+   `base` is always on. The GPU is detected (`amd`, `nvidia`, `intel` or `none`).
+4. Go through the rest of the screens as usual. The installer creates `modules/hosts/<name>/` with
+   `host.json` (name, features, GPU), `_hardware.nix` (from `nixos-generate-config`) and `disks.json`, then
+   commits it and pushes it to GitHub. From then on that PC is `nixosConfigurations.<name>`: rebuild it with
+   `vx switch` like arc.
+
+A host folder is all it takes; every `modules/hosts/<name>/host.json` becomes a machine
+(`modules/flake/hosts.nix`). Settings that differ per machine go in its `host.json`:
+
+| field | |
+|---|---|
+| `aspects` | the features, e.g. `["base", "desktop", "dev", "privacy"]` |
+| `gpu` | `amd`, `nvidia`, `intel` or `none` |
+| `primaryMonitor` | EDID model of the main screen (`wlr-randr`), or `null` for the first one |
+| `audioOutput` | the real output's PipeWire name (`vx audio devices`), or `null` |
+| `replayMonitor` | the screen the instant replay records (`"screen"` = the first) |
+| `stateVersion` | set once at install, never changed |
+
+Anything else only that machine needs goes in a `.nix` file in its folder, as
+`flake.modules.nixos.<name>`; arc keeps its monitor layout, fans and GPU passthrough that way.
+
+## Using this config yourself
+
+Fork it. You don't have to do that by hand: log in to GitHub on the installer's first screens and it finds
+your fork of `vainnor/nixos`, or offers to create one, and installs from it and pushes to it. Only the owner
+can push to `vainnor/nixos` itself; everyone else's machines live in their own fork.
+
+A fork's install makes the config yours: in `modules/flake/meta.nix` your username, name, email, SSH keys
+(from `github.com/<you>.keys`, so the owner's key can never log in to your PC), signing key and repo URL
+replace the owner's. Secrets start **off** (`secretsReady = false`, `resticReady = false`, no binary cache):
+nothing reads the owner's `secrets/secrets.yaml`, and Wi-Fi, NetBird's setup key, stream keys and backups
+are simply skipped until you make your own (see [Secrets](#after-installing-once)). `signingKey = null`
+gives plain unsigned commits and `sshKeys = [ ]` allows no SSH logins. The owner-only values that stay
+(`githubUser`, `macHost`, `macLibrewolfProfile`) do nothing on your machines; set the Mac ones to `null` or
+to your own Mac.
 
 ## Impermanence
 
@@ -259,11 +312,11 @@ gives up on it after 5 seconds and carries on. `vx cache-push` pushes the runnin
 <details>
 <summary><b>Windows VM with the GPU</b></summary>
 
-1. Run `vx vm gpu` and `vx vm usb` on the PC. Fill in `meta.vfio` in `modules/flake/meta.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `vx switch`.
+1. Run `vx vm gpu` and `vx vm usb` on the PC. Fill in `vfio` in `modules/hosts/arc/vfio.nix` with the GPU, its audio function, and the USB devices to hand over (keyboard, mouse, BEACN, headset, webcam). Then run `vx switch`. (Passthrough is arc's alone; another host with the `vm` feature gets libvirt and `win11-lite` only, unless it gets its own `vfio.nix`.)
 2. Put a Windows 11 ISO at `/var/lib/libvirt/images/Win11.iso`. Then run `vx vm virtio`, `vx vm disk win11 250G` and `vx vm setup`.
 3. `vx windows` starts the VM. Your Linux session closes, and Windows takes over the monitors at near-native speed. When you shut Windows down, you're back at the Linux login.
    The first time, install Windows and load the virtio drivers from the second CD drive.
-   To boot your existing Windows install instead, set `meta.vfio.windowsNvme` to its NVMe's PCI address. Windows may then ask you to re-activate.
+   To boot your existing Windows install instead, set `vfio.windowsNvme` to its NVMe's PCI address. Windows may then ask you to re-activate.
 
 </details>
 
@@ -333,7 +386,7 @@ on the PC and `~/Programing/nixos` on the Mac; `--repo` (or `VX_REPO`) points it
 | `vx secrets edit` | Edit the encrypted secrets (on the Mac) |
 | `vx secureboot` / `vx tpm enroll` | Check Secure Boot / enroll the TPM unlock |
 | `vx windows` | Start the Windows VM with the GPU passed through |
-| `vx audio devices` | List audio outputs (set the real one as `meta.audioOutput`) |
+| `vx audio devices` | List audio outputs (set the real one as `audioOutput` in the host's `host.json`) |
 | `vx obs reset` | Back up OBS settings and re-seed the Vainnor profile/scenes |
 | `vx fans` / `vx fans save` | Temperatures and fan speeds / save the fan curves into the repo |
 | `vx snapshots` / `vx snapshot` | List the hourly snapshots / take one now |
@@ -424,7 +477,7 @@ bar, fast key repeat, no auto-correct, screenshots in `~/Pictures/Screenshots`, 
 
 On first launch OBS opens the **Vainnor** profile and the **Vainnor Purple** scene collection.
 Mono and Horror are under *Scene Collection*. You still have to:
-1. Run `vx audio devices` and put your real output in `meta.audioOutput`, then `vx switch`. This makes **System** the default output, so all app audio reaches OBS.
+1. Run `vx audio devices` and put your real output in `audioOutput` in `modules/hosts/<name>/host.json`, then `vx switch`. This makes **System** the default output, so all app audio reaches OBS.
 2. In pwvucontrol, move each app to its channel: games to **Game**, Vesktop/TeamSpeak to **Chat**, Cider to **Music**, LibreWolf to **Browser**. Set the BEACN mic as the default input. EasyEffects cleans it up (noise removal, gate, compressor, limiter) and OBS records the cleaned **Easy Effects Source**.
 3. In OBS: add your Twitch stream key or account (*Settings > Stream*), and pick the Brio in the **Webcam** source if it isn't already selected.
 4. In Steam, set each game's launch options to `obs-gamecapture %command%` so **Game Capture** sees it.
@@ -436,8 +489,9 @@ Audio tracks: 1 Audience (everything), 2 VOD (no music), 3 voices, 4 game + othe
 
 | | |
 |---|---|
-| `modules/flake/` | flake plumbing: `meta.nix` (shared values), the installer, home-manager wiring, dev shell |
-| `modules/hosts/` | `arc` (picks aspects, disk layout, hardware), `mac`, the installer ISO |
+| `modules/flake/` | flake plumbing: `meta.nix` (shared values), `hosts.nix` (a machine per host folder), the installer, home-manager wiring, dev shell |
+| `modules/hosts/<name>/` | one folder per machine: `host.json` (features, GPU, monitor, audio), `_hardware.nix`, `disks.json`, and its own `.nix` files (arc: monitors, fans, GPU passthrough, `vx preview`) |
+| `modules/hosts/` | also `_disko.nix` (the disk layout every machine shares), `mac`, the installer ISO |
 | `modules/system/` | boot, security, impermanence, networking, secrets, backups, audio, USBGuard, monitoring |
 | `modules/desktop/` · `apps/` | the Mango session and the apps on it |
 | `modules/gaming/` · `streaming/` · `dev/` · `virtualisation/` · `privacy/` | one folder per aspect |
@@ -445,7 +499,7 @@ Audio tracks: 1 Audience (everything), 2 VOD (no music), 3 voices, 4 game + othe
 | `assets/` | the overlay pack and these README images |
 | `templates/` | per-language project templates for `vx new` |
 
-Files and folders whose path contains `/_` (like `hosts/arc/_disko.nix`) aren't auto-loaded.
+Files and folders whose path contains `/_` (like `hosts/_disko.nix`) aren't auto-loaded.
 
 ## If the drive dies
 
