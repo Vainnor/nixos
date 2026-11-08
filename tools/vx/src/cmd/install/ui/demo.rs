@@ -210,7 +210,12 @@ pub fn data() -> InstallData {
             ("streaming", "obs, instant replay", false),
             ("vm", "libvirt, windows vm, gpu passthrough", false),
         ]
-        .map(|(n, d, on)| AspectInfo { name: n.into(), description: d.into(), default: on })
+        .map(|(n, d, on)| AspectInfo {
+            name: n.into(),
+            description: d.into(),
+            default: on,
+            requires: if matches!(n, "dev" | "gaming" | "streaming" | "vm") { vec!["desktop".into()] } else { vec![] },
+        })
         .to_vec(),
         state_version: "26.11".into(),
     }

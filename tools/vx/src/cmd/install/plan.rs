@@ -430,6 +430,50 @@ pub struct AspectInfo {
     pub description: String,
     #[serde(default)]
     pub default: bool,
+    /// Aspects this one needs on too (dev, gaming, streaming and vm: desktop).
+    #[serde(default)]
+    pub requires: Vec<String>,
+}
+
+/// Turn an aspect on or off in a new host's checklist, keeping `requires`:
+/// on also turns on what it needs, off also turns off what needs it.
+pub fn toggle_aspect(all: &[AspectInfo], on: &mut std::collections::BTreeSet<String>, name: &str) {
+    if on.remove(name) {
+        // Off: drop everything that (transitively) needs something now off.
+        loop {
+            let gone: Vec<String> = all
+                .iter()
+                .filter(|a| on.contains(&a.name) && a.requires.iter().any(|r| r != "base" && !on.contains(r)))
+                .map(|a| a.name.clone())
+                .collect();
+            if gone.is_empty() {
+                break;
+            }
+            for g in gone {
+                on.remove(&g);
+            }
+        }
+    } else {
+        on.insert(name.to_string());
+        with_requires(all, on);
+    }
+}
+
+/// Add every aspect the chosen ones need (transitively).
+pub fn with_requires(all: &[AspectInfo], on: &mut std::collections::BTreeSet<String>) {
+    loop {
+        let need: Vec<String> = all
+            .iter()
+            .filter(|a| on.contains(&a.name))
+            .flat_map(|a| a.requires.iter())
+            .filter(|r| *r != "base" && !on.contains(*r))
+            .cloned()
+            .collect();
+        if need.is_empty() {
+            break;
+        }
+        on.extend(need);
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -602,12 +646,41 @@ mod tests {
             r#"{"host":"arc","repoUrl":"x","flake":"/nix/store/x","owner":"vainnor","repo":"nixos","stateVersion":"26.11",
                "defaults":{"hostname":"arc","username":"vainnor","timeZone":"UTC","wallpaper":"eye","theme":"match"},
                "wallpapers":[],"themes":[],"hosts":[{"name":"arc","aspects":["base","gaming"],"gpu":"amd"}],
-               "aspects":[{"name":"gaming","description":"steam","default":false}]}"#,
+               "aspects":[{"name":"gaming","description":"steam","default":false,"requires":["desktop"]}],
+               "githubUser":"Vainnor"}"#,
         )
         .unwrap();
         assert_eq!(d.hosts[0].gpu, Gpu::Amd);
         assert_eq!(d.state_version, "26.11");
         assert!(!d.aspects[0].default);
+        assert_eq!(d.aspects[0].requires, ["desktop"]);
+    }
+
+    #[test]
+    fn aspect_requires() {
+        let a = |n: &str, r: &[&str]| AspectInfo {
+            name: n.into(),
+            description: String::new(),
+            default: false,
+            requires: r.iter().map(|s| s.to_string()).collect(),
+        };
+        let all = [a("desktop", &[]), a("dev", &["desktop"]), a("gaming", &["desktop"]), a("privacy", &[]), a("x", &["gaming"])];
+        let mut on = std::collections::BTreeSet::new();
+        let names = |on: &std::collections::BTreeSet<String>| on.iter().cloned().collect::<Vec<_>>().join(" ");
+        toggle_aspect(&all, &mut on, "x");
+        assert_eq!(names(&on), "desktop gaming x", "on pulls in what it needs, transitively");
+        toggle_aspect(&all, &mut on, "dev");
+        toggle_aspect(&all, &mut on, "privacy");
+        toggle_aspect(&all, &mut on, "desktop");
+        assert_eq!(names(&on), "privacy", "off drops everything that needs it");
+        toggle_aspect(&all, &mut on, "desktop");
+        toggle_aspect(&all, &mut on, "gaming");
+        toggle_aspect(&all, &mut on, "x");
+        toggle_aspect(&all, &mut on, "gaming");
+        assert_eq!(names(&on), "desktop privacy");
+        let mut on: std::collections::BTreeSet<String> = ["dev".to_string()].into();
+        with_requires(&all, &mut on);
+        assert_eq!(names(&on), "desktop dev");
     }
 
     #[test]

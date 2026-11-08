@@ -2,7 +2,7 @@
 //! own folder, features, graphics card).
 
 use super::super::super::engine::settings::host_name;
-use super::super::super::plan::Gpu;
+use super::super::super::plan::{Gpu, toggle_aspect};
 use super::super::app::{Act, App, Field};
 use super::super::form::{Row, button_row, check, choice_row, input_row, pad, radio};
 use super::para;
@@ -54,7 +54,7 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         let note = if v.is_empty() {
             Some(Span::styled("also its hostname", t.muted()))
         } else {
-            match host_name(v) {
+            match host_name(v, &app.aspect_names()) {
                 Err(e) => Some(Span::styled(e, t.fg(t.red))),
                 Ok(()) if hosts.iter().any(|h| h.name.eq_ignore_ascii_case(v)) => {
                     Some(Span::styled("already in the repo: pick it above", t.fg(t.red)))
@@ -103,10 +103,10 @@ pub fn act(app: &mut App, f: Field, a: Act) {
             app.focus = Some(Field::HostName);
         }
         Field::Aspect(i) if flip => {
-            if let Some(name) = app.data.as_ref().and_then(|d| d.aspects.get(i)).map(|x| x.name.clone())
-                && !app.new_aspects.remove(&name)
+            if let Some(d) = app.data.as_ref()
+                && let Some(name) = d.aspects.get(i).map(|x| x.name.clone())
             {
-                app.new_aspects.insert(name);
+                toggle_aspect(&d.aspects, &mut app.new_aspects, &name);
             }
         }
         Field::Gpu => {

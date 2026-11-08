@@ -22,14 +22,14 @@ const HOOK: &str = "/var/lib/libvirt/hooks/qemu.d/gpu-passthrough";
 const GPU_USED: &str = "/run/win11-gpu-used";
 const VIRTIO_URL: &str =
     "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso";
-/// Fallbacks when meta.nix can't be read.
+/// Fallbacks when the host's vfio.nix can't be read.
 const DEFAULT_GPU: &str = "0000:03:00.0";
 const DEFAULT_ROM: &str = "/var/lib/libvirt/vbios/rx7900xtx.rom";
 
 const WINDOWS_ABOUT: &str = "\
 Start Windows with the GPU (your Linux session closes until Windows shuts down)
 
-GPU passthrough is currently disabled on this PC: meta.vfio.reserveGpu is
+GPU passthrough is currently disabled on this PC: reserveGpu (hosts/arc/vfio.nix) is
 false and the card gives no picture in Windows. The command is kept, but it
 warns and asks first: starting it takes the GPU from the desktop, and the PC
 reboots when Windows shuts down (the card can't be handed back to Linux).";
@@ -77,11 +77,11 @@ pub enum VmCmd {
     },
     /// Open the light Windows VM's window (it must be running; `vx windows lite` starts it)
     Console,
-    /// Show the GPU's PCI addresses and IOMMU group (for meta.vfio)
+    /// Show the GPU's PCI addresses and IOMMU group (for modules/hosts/<host>/vfio.nix)
     Gpu,
-    /// Save the GPU's video BIOS for the gaming VM (needed for a picture; see meta.vfio.gpuRom)
+    /// Save the GPU's video BIOS for the gaming VM (needed for a picture; see gpuRom in hosts/<host>/vfio.nix)
     Vbios {
-        /// PCI address of the card (default: meta.vfio.gpu)
+        /// PCI address of the card (default: gpu in hosts/<host>/vfio.nix)
         gpu: Option<String>,
     },
     /// List USB devices (vendor:product) to pass into the Windows VM
@@ -194,9 +194,9 @@ fn with_args(mut c: Command, args: &[&str]) -> Command {
     c
 }
 
-// ── meta.vfio ──
+// ── hosts/<host>/vfio.nix ──
 
-/// The parts of `meta.vfio` (modules/flake/meta.nix) vx needs.
+/// The parts of a host's `vfio` (modules/hosts/<host>/vfio.nix) vx needs.
 #[derive(Debug, PartialEq, Eq)]
 struct Vfio {
     gpu: String,
@@ -220,11 +220,20 @@ impl Vfio {
     }
 }
 
+/// This host's passthrough settings: `vfio = { ... };` in
+/// modules/hosts/<host>/vfio.nix. No file (a host without passthrough) is None.
 fn read_vfio(ctx: &Ctx) -> Result<Option<Vfio>> {
-    let path = ctx.repo()?.join("modules/flake/meta.nix");
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("could not read {}", path.display()))?;
-    parse_vfio(&text).with_context(|| format!("could not parse meta.vfio in {}", path.display()))
+    let path = ctx.repo()?.join(vfio_rel(ctx.nixos_host()));
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("could not read {}", path.display())),
+    };
+    parse_vfio(&text).with_context(|| format!("could not parse vfio in {}", path.display()))
+}
+
+fn vfio_rel(host: &str) -> String {
+    format!("modules/hosts/{host}/vfio.nix")
 }
 
 /// Find `vfio = { ... };` (or `vfio = null;`) and pull out its scalar keys.
@@ -236,7 +245,7 @@ fn parse_vfio(text: &str) -> Result<Option<Vfio>> {
         .collect::<Vec<_>>()
         .join("\n");
     let start = Regex::new(r"(?m)^\s*vfio\s*=\s*")?;
-    let m = start.find(&code).context("no `vfio =` in meta.nix")?;
+    let m = start.find(&code).context("no `vfio =` in the file")?;
     let rest = &code[m.end()..];
     if rest.trim_start().starts_with("null") {
         return Ok(None);
@@ -285,8 +294,8 @@ fn parse_vfio(text: &str) -> Result<Option<Vfio>> {
     }
     let get = |k: &str| vals.get(k).cloned().flatten();
     Ok(Some(Vfio {
-        gpu: get("gpu").context("meta.vfio has no gpu")?,
-        gpu_audio: get("gpuAudio").context("meta.vfio has no gpuAudio")?,
+        gpu: get("gpu").context("vfio has no gpu")?,
+        gpu_audio: get("gpuAudio").context("vfio has no gpuAudio")?,
         gpu_rom: get("gpuRom"),
         reserve_gpu: get("reserveGpu").as_deref() == Some("true"),
         windows_nvme: get("windowsNvme"),
@@ -326,7 +335,7 @@ fn status(ctx: &Ctx) -> Result<()> {
 
     ui::heading("gpu passthrough");
     match read_vfio(ctx) {
-        Ok(None) => ui::info("meta.vfio is null: no GPU VM on this PC"),
+        Ok(None) => ui::info("no vfio in this host's modules/hosts/<host>/vfio.nix: no GPU VM"),
         Err(e) => ui::warn(&format!("{e:#}")),
         Ok(Some(v)) => {
             let mut rows: Vec<(&str, String)> = v
@@ -528,7 +537,7 @@ fn windows(ctx: &Ctx, yes: bool) -> Result<()> {
         None
     });
     if vfio.is_none() && !Path::new(TEMPLATES).join(format!("{GPU_VM}.xml")).exists() {
-        bail!("no GPU VM on this PC (meta.vfio is null); `vx windows lite` is the light VM");
+        bail!("no GPU VM on this PC (this host has no vfio); `vx windows lite` is the light VM");
     }
     if vfio.as_ref().is_some_and(|v| !v.reserve_gpu) {
         ui::warn("GPU passthrough is disabled on this PC: the card gives no picture in Windows");
@@ -556,7 +565,7 @@ fn gpu_list(ctx: &Ctx) -> Result<()> {
             let tag = vfio
                 .as_ref()
                 .and_then(|v| v.devices().into_iter().find(|(_, a)| *a == addr))
-                .map(|(k, _)| format!("  <- meta.vfio.{k}"))
+                .map(|(k, _)| format!("  <- vfio.{k}"))
                 .unwrap_or_default();
             (group, format!("{l}{tag}"))
         })
@@ -741,8 +750,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_real_meta() {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../modules/flake/meta.nix");
+    fn parses_real_vfio() {
+        assert_eq!(vfio_rel("arc"), "modules/hosts/arc/vfio.nix");
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../modules/hosts/arc/vfio.nix");
         if let Ok(text) = std::fs::read_to_string(p) {
             let v = parse_vfio(&text).unwrap();
             if let Some(v) = v {

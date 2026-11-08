@@ -181,13 +181,17 @@ pub fn host_json(h: &NewHost) -> String {
 }
 
 /// A host name the flake can use: `[a-z][a-z0-9-]{0,30}`, and not taken by something else.
-pub fn host_name(s: &str) -> Result<(), String> {
+/// A new host's name (its folder and hostname); `aspects` are the flake's aspect names, which a host can't share.
+pub fn host_name(s: &str, aspects: &[&str]) -> Result<(), String> {
     let re = Regex::new(r"^[a-z][a-z0-9-]{0,30}$").unwrap();
     if !re.is_match(s) || s.ends_with('-') {
         return Err("name: start with a-z, then a-z 0-9 - (31 at most)".into());
     }
     if matches!(s, "mac" | "installer" | "default" | "base" | "nixos" | "localhost") {
         return Err(format!("name: {s} is taken by the flake, pick another"));
+    }
+    if aspects.contains(&s) {
+        return Err(format!("name: {s} is a feature's name, pick another"));
     }
     Ok(())
 }
@@ -386,10 +390,11 @@ mod tests {
 
     #[test]
     fn host_names() {
-        assert!(host_name("forge").is_ok());
-        assert!(host_name("pc-2").is_ok());
+        assert!(host_name("forge", &["desktop"]).is_ok());
+        assert!(host_name("pc-2", &[]).is_ok());
+        assert!(host_name("desktop", &["desktop", "dev"]).is_err());
         for bad in ["", "Forge", "2pc", "mac", "installer", "a_b", "pc-", &"a".repeat(32)] {
-            assert!(host_name(bad).is_err(), "{bad}");
+            assert!(host_name(bad, &[]).is_err(), "{bad}");
         }
     }
 

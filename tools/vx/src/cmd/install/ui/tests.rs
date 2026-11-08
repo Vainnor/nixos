@@ -336,6 +336,19 @@ fn new_machine_plan() {
     assert_eq!(h.gpu, Gpu::Nvidia);
     assert_eq!(h.state_version, "26.11");
     assert_eq!(p.settings.hostname, "forge", "the hostname is the machine's name");
+    // desktop off takes dev and gaming with it (they need it); gaming back on brings it back.
+    let pos = |a: &App, n: &str| a.data.as_ref().unwrap().aspects.iter().position(|x| x.name == n).unwrap();
+    a.focus = Some(Field::Aspect(pos(&a, "desktop")));
+    key(&mut a, KeyCode::Char(' '));
+    let HostPlan::New(h) = a.build_plan().unwrap().host else { panic!() };
+    assert_eq!(h.aspects, ["base", "privacy"]);
+    a.focus = Some(Field::Aspect(gaming));
+    key(&mut a, KeyCode::Char(' '));
+    let HostPlan::New(h) = a.build_plan().unwrap().host else { panic!() };
+    assert_eq!(h.aspects, ["base", "desktop", "privacy", "gaming"]);
+    a.new_name.value = "gaming".into();
+    assert!(a.build_plan().unwrap_err().contains("feature"), "a host can't share an aspect's name");
+    a.new_name.value = "forge".into();
     // Back to arc.
     a.host_choice = Some("arc".into());
     let p = a.build_plan().unwrap();

@@ -5,7 +5,7 @@ use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::engine::settings::host_name;
 use super::super::plan::{
     Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, GitHubMode, GitHubPlan, Gpu, HomePlan, HostInfo, HostPlan, InstallData,
-    Machine, NewHost, Outcome, Plan, Previous, Secret, Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO,
+    Machine, NewHost, Outcome, Plan, Previous, Secret, Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO, with_requires,
 };
 use super::super::probe::{self, BackupTarget};
 use super::backend::Backend;
@@ -715,6 +715,11 @@ impl App {
         d.hosts.clone()
     }
 
+    /// Every aspect's name (a new host can't be called one).
+    pub fn aspect_names(&self) -> Vec<&str> {
+        self.data.as_ref().map(|d| d.aspects.iter().map(|a| a.name.as_str()).collect()).unwrap_or_default()
+    }
+
     /// Reinstall the previous install's host when there is one, else a new machine.
     pub fn set_host_defaults(&mut self) {
         let hosts = self.hosts();
@@ -727,6 +732,7 @@ impl App {
         let Some(d) = &self.data else { return };
         self.host_choice = if self.previous.is_some() && hosts.iter().any(|h| h.name == d.host) { Some(d.host.clone()) } else { None };
         self.new_aspects = d.aspects.iter().filter(|a| a.default && a.name != "base").map(|a| a.name.clone()).collect();
+        with_requires(&d.aspects, &mut self.new_aspects);
         self.new_gpu = self.machine.as_ref().map(|m| m.gpu).unwrap_or_default();
         self.host_defaults_set = true;
     }
@@ -1097,7 +1103,7 @@ impl App {
             Some(h) => Err(format!("{h} isn't in the repo: pick the machine again")),
             None => {
                 let n = &self.new_name.value;
-                host_name(n)?;
+                host_name(n, &self.aspect_names())?;
                 if hosts.iter().any(|h| h.name.eq_ignore_ascii_case(n)) {
                     return Err(format!("name: {n} is already in the repo: pick it above to reinstall it"));
                 }
@@ -1235,9 +1241,11 @@ impl App {
             Some(h) => HostPlan::Existing(h.clone()),
             None => {
                 let data = self.data.as_ref().ok_or("the install data isn't loaded")?;
+                let mut chosen = self.new_aspects.clone();
+                with_requires(&data.aspects, &mut chosen);
                 let mut aspects = vec!["base".to_string()];
                 // In the data's order.
-                aspects.extend(data.aspects.iter().filter(|a| self.new_aspects.contains(&a.name)).map(|a| a.name.clone()));
+                aspects.extend(data.aspects.iter().filter(|a| chosen.contains(&a.name)).map(|a| a.name.clone()));
                 HostPlan::New(NewHost { name: self.new_name.value.clone(), aspects, gpu: self.new_gpu, state_version: data.state_version.clone() })
             }
         })
