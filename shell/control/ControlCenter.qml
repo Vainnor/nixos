@@ -224,7 +224,10 @@ Overlay {
             }
         }
 
-        // 5. Session
+        // 5. Wallpaper (also Super+W)
+        Btn { Layout.fillWidth: true; text: "[ wallpaper ]"; onClicked: Panels.show("wallpaper") }
+
+        // 6. Session
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.gap

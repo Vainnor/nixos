@@ -93,6 +93,7 @@ in
         pkgs.quickshell # `qs` for `vx shell dev`
       ]
       ++ (with pkgs; [
+        swaybg # the wallpaper picker swaps the wallpaper at once, before the rebuild
         libqalculate # calculator tab
         fd # files tab
         wl-clipboard
