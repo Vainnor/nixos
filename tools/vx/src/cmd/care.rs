@@ -4,7 +4,7 @@
 mod mounts;
 mod persist;
 mod restore;
-mod secrets;
+pub mod secrets;
 
 use crate::ctx::{Ctx, Host};
 use crate::ui;

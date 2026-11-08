@@ -32,12 +32,18 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
     });
     r.push(if m.online { mark(t, 0, "online") } else { mark(t, 1, "offline: installs the repo copy on this usb") });
     r.push(if m.setup_mode {
-        mark(t, 0, "secure boot in setup mode: the new system can enroll its keys")
+        mark(t, 0, "secure boot in setup mode: the installer enrolls your keys")
     } else if m.secure_boot {
         mark(t, 1, "secure boot is on: turn it off in the bios before rebooting")
     } else {
         mark(t, 0, "secure boot off (turned on after the first boot)")
     });
+    // Optional: Setup Mode lets the installer enroll the keys, so the only
+    // step left after the install is turning Secure Boot on.
+    let sb_hint = !m.setup_mode && m.uefi;
+    if m.setup_mode && app.disks.iter().any(|d| matches!(d.kind, super::super::super::plan::DiskKind::Windows { bitlocker: true, .. })) {
+        r.push(mark(t, 1, "bitlocker: new secure boot keys make windows ask for its recovery key once; have it ready"));
+    }
     r.push(if m.tpm { mark(t, 0, "tpm found") } else { mark(t, 1, "no tpm: the disk unlocks with its password only") });
     let disks = match &app.probe_error {
         Some(e) => mark(t, 2, format!("couldn't list the disks: {e}")),
@@ -47,6 +53,18 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         }
     };
     r.push(disks);
+    if sb_hint {
+        r.push(Row::blank());
+        let carry = if app.previous.is_some() { " (not needed if you carry over the old install's keys)" } else { "" };
+        r.extend(para(
+            t,
+            &format!(
+                "for secure boot to set itself up, put it in setup mode first (bios: secure boot → delete keys / setup mode){carry}. optional."
+            ),
+            w,
+        ));
+        r.push(button_row(t, Field::RebootFirmware, "reboot into bios"));
+    }
     r.push(Row::blank());
     let lbl = if app.offline {
         "use the copy on this usb (--offline)"
@@ -70,6 +88,7 @@ pub fn act(app: &mut App, f: Field, a: Act) {
                 app.fetch_latest = !app.fetch_latest;
             }
         }
+        (Field::RebootFirmware, Act::Select | Act::Toggle) => app.exit = Some(super::super::app::Exit::Firmware),
         (Field::Start, Act::Select | Act::Toggle) => {
             let Some(m) = &app.machine else { return };
             if app.probe_error.is_some() {

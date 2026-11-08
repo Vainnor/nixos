@@ -8,12 +8,14 @@
 //! - `previous` unlocking a previous install read-only, what it can carry
 //! - `settings` meta.nix / host.json / disks.json edits
 //! - `github`   logging in, the user's fork, their keys
+//! - `netbird`  logging in to NetBird on the installer
 //! - `steps`    the install steps
 //! - `finish`   the summary's next steps
 
 mod disk;
 mod finish;
 pub mod github;
+pub mod netbird;
 mod previous;
 mod runner;
 pub mod settings;
@@ -138,6 +140,21 @@ pub fn gh_fork(owner: &str, repo: &str, login: &str, mode: Mode) -> (Result<gith
     logged(mode, |r| github::fork(r, owner, repo, login))
 }
 
+/// NetBird: `netbird up` for `host`; the URL to log in at (or already connected).
+pub fn nb_start(host: &str, mode: Mode) -> (Result<netbird::Start>, Vec<String>) {
+    logged(mode, |r| netbird::start(r, host))
+}
+
+/// Wait for the NetBird login to finish; this peer's address. `cancel` stops waiting.
+pub fn nb_wait(cancel: &AtomicBool, mode: Mode) -> (Result<netbird::Status>, Vec<String>) {
+    logged(mode, |r| netbird::wait(r, cancel))
+}
+
+/// Stop a waiting `netbird up` (leaving the screen, quitting).
+pub fn nb_stop() {
+    netbird::stop();
+}
+
 /// Unlock (when encrypted) and mount a previous install read-only under
 /// OLD_MOUNT, and list what can be carried over.
 pub fn unlock_previous(prev: &Previous, password: Option<&Secret>, mode: Mode) -> Result<Unlocked> {
@@ -259,6 +276,8 @@ pub(crate) mod tests {
             previous: None,
             carry: BTreeSet::new(),
             home: HomePlan::Fresh,
+            setup_mode: false,
+            netbird: false,
         }
     }
 
@@ -399,15 +418,16 @@ pub(crate) mod tests {
             &[
                 "findmnt -n -o SOURCE /iso",
                 "lsblk -J -p -o NAME,TYPE,FSTYPE,PARTLABEL,MOUNTPOINTS /dev/disk/by-id/nvme-SYS",
-                "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/arc/disks.json",
+                // The host key is made before the settings commit: its age key goes into .sops.yaml.
+                "ssh-keygen -q -t ed25519 -N '' -C root@arc -f /tmp/vx-install/hostkey/ssh_host_ed25519_key",
+                "ssh-to-age < (stdin)",
+                "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/arc/disks.json .sops.yaml",
                 "nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths /nonexistent/vx-install/nixos#nixosConfigurations.arc.config.system.build.diskoScript",
                 "/nix/store/00000000000000000000000000000000-disko",
                 "mkpasswd -m yescrypt --stdin < (stdin)",
-                "ssh-keygen -q -t ed25519 -N '' -C root@arc -f /mnt/persistent/etc/ssh/ssh_host_ed25519_key",
-                "ssh-to-age < (stdin)",
                 "lsblk -J -p -o NAME,TYPE,FSTYPE,PARTLABEL,MOUNTPOINTS /dev/disk/by-id/nvme-SYS",
                 "cryptsetup luksAddKey --key-file /tmp/vx-install/disk.key /dev/disk/by-id/nvme-SYS-part2 /mnt/persistent/install/tpm-enroll.key",
-                "git -C /nonexistent/vx-install/nixos add -A -- modules/flake/meta.nix modules/hosts/arc",
+                "git -C /nonexistent/vx-install/nixos add -A -- modules/flake/meta.nix modules/hosts/arc .sops.yaml",
                 "git -C /nonexistent/vx-install/nixos -c user.name=Vainnor -c user.email=vainnor@example.com -c commit.gpgsign=false commit -q -m 'chore(arc): install settings'",
                 "nixos-install --flake /nonexistent/vx-install/nixos#arc --no-root-passwd --no-channel-copy",
                 "git -C /nonexistent/vx-install/nixos -c credential.https://github.com.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' push -u origin HEAD:main",
@@ -423,6 +443,9 @@ pub(crate) mod tests {
         assert!(logs.contains(&"write /tmp/vx-install/keys/games.key (64 random bytes, 600)".to_string()));
         assert!(logs.contains(&"copy /tmp/vx-install/keys/games.key -> /mnt/persistent/etc/keys/games.key (400)".to_string()));
         assert!(logs.iter().any(|l| l.starts_with("write /mnt/persistent/passwords/vainnor (secret")));
+        assert!(logs.contains(&"write /nonexistent/vx-install/nixos/.sops.yaml (644)".to_string()));
+        assert!(logs.contains(&"copy /tmp/vx-install/hostkey/ssh_host_ed25519_key -> /mnt/persistent/etc/ssh/ssh_host_ed25519_key (600)".to_string()));
+        assert!(!c.iter().any(|c| c.starts_with("sbctl") || c.starts_with("netbird")), "not in setup mode, no netbird login");
 
         // Every step ran and it ended in Done.
         let n = steps(&plan).len();
@@ -431,10 +454,12 @@ pub(crate) mod tests {
         let Some(Event::Done(o)) = events.last() else { panic!("didn't end in Done: {:?}", events.last()) };
         assert!(o.age_key.starts_with("age1"));
         assert!(!o.host_key_carried);
-        assert!(o.next_steps.iter().any(|s| s.contains("vx secrets add-host age1")));
-        assert!(o.next_steps.iter().any(|s| s == "sudo netbird up"));
-        assert!(!o.next_steps.iter().any(|s| s.contains("gh auth login")), "gh's login was copied");
+        let all = o.next_steps.join("\n");
+        assert!(!all.contains("add-host") && !all.contains("netbird") && !all.contains("gh auth") && !all.contains("push"), "{all}");
+        assert_eq!(o.next_steps.len(), 2, "usb + secure boot; secrets are off in this meta: {all}");
+        assert!(!o.secrets_pending && !o.sb_enrolled);
         assert_eq!(o.pushed.as_deref(), Some("vainnor/nixos main"));
+        assert_eq!(o.not_pushed, None);
     }
 
     #[test]
@@ -467,7 +492,8 @@ pub(crate) mod tests {
         assert!(logs.iter().any(|l| l.contains("edit modules/flake/meta.nix for your fork")));
         let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
         assert_eq!(o.pushed.as_deref(), Some("someone/nixos main"));
-        assert!(o.next_steps.iter().any(|s| s.starts_with("secrets are off")));
+        assert!(!c.iter().any(|c| c.contains(".sops.yaml")), "a fork's secrets are its own: .sops.yaml untouched");
+        assert!(!o.secrets_pending);
     }
 
     #[test]
@@ -482,8 +508,8 @@ pub(crate) mod tests {
         assert!(!logs.iter().any(|l| l.contains("gh/hosts.yml")), "no gh login to copy");
         let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
         assert_eq!(o.pushed, None);
-        assert!(o.next_steps.iter().any(|s| s.contains("vx sync")));
-        assert!(o.next_steps.iter().any(|s| s == "gh auth login"));
+        assert!(o.not_pushed.as_deref().unwrap().contains("vx sync"));
+        assert!(!o.next_steps.iter().any(|s| s.contains("gh auth") || s.contains("push")));
     }
 
     #[test]
@@ -516,6 +542,8 @@ pub(crate) mod tests {
                 "rsync -aHAX --exclude=/install /run/vx-install/old/persistent/ /tmp/vx-install/carry/",
                 "umount /run/vx-install/old/top",
                 "cryptsetup close vx-old",
+                // The carried host key's age recipient; .sops.yaml stays as it is.
+                "ssh-to-age",
                 "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/arc/disks.json",
                 "mount -t btrfs -o subvolid=5 /dev/mapper/cryptroot /tmp/vx-install/top",
                 "btrfs subvolume delete /tmp/vx-install/top/@persistent",
@@ -530,7 +558,6 @@ pub(crate) mod tests {
                 "nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths /nonexistent/vx-install/nixos#nixosConfigurations.arc.config.system.build.diskoDataScript",
                 "/nix/store/00000000000000000000000000000000-disko-data",
                 "rsync -aHAX /tmp/vx-install/carry/ /mnt/persistent/",
-                "ssh-to-age",
                 "rsync -aHAX /mnt/persistent/var/lib/sbctl/ /mnt/var/lib/sbctl/",
                 "cryptsetup luksAddKey --key-file /tmp/vx-install/disk.key /dev/nvme0n1p2 /mnt/persistent/install/tpm-enroll.key",
                 "git -C /nonexistent/vx-install/nixos -c user.name=Vainnor",
@@ -546,8 +573,10 @@ pub(crate) mod tests {
         assert!(logs.iter().any(|l| l.starts_with("move /mnt/home/vainnor/nixos -> /mnt/home/vainnor/nixos.before-reinstall-")));
         let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
         assert!(o.host_key_carried);
-        assert_eq!(o.next_steps[1], "turn secure boot back on in the bios: your keys are still enrolled");
-        assert!(!o.next_steps.iter().any(|s| s.contains("netbird") || s.contains("add-host")));
+        assert_eq!(o.next_steps[1], "turn secure boot back on in the bios: your keys are still enrolled; the disk then unlocks itself");
+        assert!(!o.next_steps.iter().any(|s| s.contains("netbird") || s.contains("secrets")));
+        assert!(!c.iter().any(|c| c.contains(".sops.yaml")), "a carried key is already a recipient");
+        assert_eq!(o.netbird.as_deref(), Some("carried over"));
     }
 
     #[test]
@@ -578,6 +607,106 @@ pub(crate) mod tests {
         // Username changed: the single old password file is renamed.
         assert!(logs.contains(&"move /mnt/persistent/passwords/vainnor -> /mnt/persistent/passwords/carson".to_string()));
         assert!(matches!(events.last(), Some(Event::Done(_))));
+    }
+
+    #[test]
+    fn secure_boot_enrolled_before_the_install() {
+        let mut plan = plan_fresh();
+        plan.setup_mode = true;
+        let n = names(&plan);
+        let at = |s: &str| n.iter().position(|x| x == s).unwrap_or_else(|| panic!("no {s} in {n:?}"));
+        assert!(at("set up passwords and keys") < at("enroll secure boot keys"));
+        assert!(at("enroll secure boot keys") < at("install the system"));
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        no_secrets(&logs);
+        let c = cmds(&logs);
+        assert_order(
+            &c,
+            &[
+                "sbctl create-keys",
+                "chattr -i /sys/firmware/efi/efivars/PK-8be4df61-93ca-11d2-aa0d-00e098032b8c /sys/firmware/efi/efivars/KEK-",
+                "sbctl enroll-keys --microsoft",
+                "rsync -aHAX /var/lib/sbctl/ /mnt/persistent/var/lib/sbctl/",
+                "rsync -aHAX /var/lib/sbctl/ /mnt/var/lib/sbctl/",
+                "nixos-install",
+            ],
+        );
+        assert!(logs.contains(&"mkdir /mnt/persistent/var/lib/sbctl (700)".to_string()));
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert!(o.sb_enrolled);
+        assert_eq!(o.next_steps[1], "turn secure boot on in the bios (your keys are enrolled); the disk then unlocks itself");
+
+        // Carried keys: those are enrolled, none made.
+        let mut plan = plan_keep();
+        plan.setup_mode = true;
+        let (logs, _, res) = dry(&plan);
+        res.unwrap();
+        let c = cmds(&logs);
+        assert!(!c.iter().any(|c| c == "sbctl create-keys"));
+        assert_order(&c, &["rsync -aHAX /mnt/persistent/var/lib/sbctl/ /var/lib/sbctl/", "sbctl enroll-keys --microsoft", "rsync -aHAX /var/lib/sbctl/ /mnt/var/lib/sbctl/", "nixos-install"]);
+        assert!(!c.iter().any(|c| c == "rsync -aHAX /var/lib/sbctl/ /mnt/persistent/var/lib/sbctl/"), "already there");
+    }
+
+    #[test]
+    fn netbird_login_is_copied_in_restore() {
+        let mut plan = plan_fresh();
+        plan.netbird = true;
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        let c = cmds(&logs);
+        assert_order(
+            &c,
+            &[
+                "/nix/store/00000000000000000000000000000000-disko",
+                "netbird status --json",
+                "netbird down",
+                "rsync -rlt --chmod=D700,F600 /var/lib/netbird/ /mnt/persistent/var/lib/netbird/",
+                "git -C /nonexistent/vx-install/nixos -c user.name=Vainnor",
+                "nixos-install",
+            ],
+        );
+        assert!(logs.contains(&"mkdir /mnt/persistent/var/lib/netbird (700)".to_string()));
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert_eq!(o.netbird.as_deref(), Some("100.92.14.7 (forge.netbird.cloud)"));
+        // Carried over: the old login is kept, nothing copied from the usb.
+        let mut plan = plan_keep();
+        plan.netbird = true;
+        let c = cmds(&dry(&plan).0);
+        assert!(!c.iter().any(|c| c.starts_with("netbird")));
+    }
+
+    /// The repo's meta.nix with secrets on, in a temp repo (skipped where the repo isn't there).
+    fn repo_with_secrets(name: &str) -> Option<PathBuf> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let meta = std::fs::read_to_string(root.join(steps::META_REL)).ok()?;
+        let dir = std::env::temp_dir().join(format!("vx-secrets-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("modules/flake")).unwrap();
+        std::fs::write(dir.join(steps::META_REL), meta.replace("secretsReady = false;", "secretsReady = true;")).unwrap();
+        std::fs::write(dir.join(".sops.yaml"), crate::sops::SAMPLE).unwrap();
+        Some(dir)
+    }
+
+    #[test]
+    fn secrets_on_new_host_key() {
+        let Some(dir) = repo_with_secrets("new") else { return };
+        let mut plan = plan_fresh();
+        plan.flake = dir.clone();
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert!(o.secrets_pending && !o.host_key_carried);
+        assert!(o.next_steps[2].starts_with("secrets: your other machines add this one automatically"));
+        assert!(!logs.iter().any(|l| l.contains("secrets-ok")), "it waits for the re-encryption");
+        // Carried: secrets already work; the wait unit is told so.
+        let mut plan = plan_keep();
+        plan.flake = dir.clone();
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        assert!(logs.contains(&"write /mnt/persistent/install/secrets-ok (644)".to_string()));
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert!(!o.secrets_pending);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

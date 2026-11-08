@@ -2,13 +2,13 @@
 //! calls them in order and reports progress.
 
 use super::super::plan::{
-    Carry, DATA_KEYS, DISK_KEY, DataMode, GH_CONFIG, GitHubMode, HomePlan, HostPlan, INSTALLED_KEYS, Outcome, Plan,
-    TPM_ENROLL_KEY, Unlocked, WORK, disks_json_path, hardware_path, host_dir, host_json_path,
+    Carry, DATA_KEYS, DISK_KEY, DataMode, GH_CONFIG, GitHubMode, HOST_KEY_WORK, HomePlan, HostPlan, INSTALLED_KEYS, NETBIRD_STATE,
+    Outcome, Plan, SBCTL_DIR, SECRETS_OK, TPM_ENROLL_KEY, Unlocked, WORK, disks_json_path, hardware_path, host_dir, host_json_path,
 };
 use super::disk::{self, find_part};
 use super::finish::{self, NextInput, PushState};
 use super::runner::{Cmd, Runner, shell_quote};
-use super::{github, previous, settings};
+use super::{github, netbird, previous, settings};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
@@ -20,6 +20,11 @@ pub const BACKUP_MOUNT: &str = "/run/vx-install/backup";
 /// Marker written by prepare_repo when WORK_REPO is a snapshot, not a clone.
 pub const SNAPSHOT_MARK: &str = "/tmp/vx-install/repo-is-snapshot";
 pub const META_REL: &str = "modules/flake/meta.nix";
+pub const SOPS_REL: &str = ".sops.yaml";
+const HOST_KEY_NAME: &str = "ssh_host_ed25519_key";
+/// Firmware variables that may be immutable before enrolling (efivarfs).
+const SB_VARS: [&str; 4] = ["PK-", "KEK-", "db-", "dbx-"];
+const EFIVARS: &str = "/sys/firmware/efi/efivars";
 
 pub fn carry_dir() -> PathBuf {
     Path::new(WORK).join("carry")
@@ -44,6 +49,7 @@ pub enum Step {
     Disks,
     Hardware,
     Restore,
+    SecureBoot,
     Commit,
     Install,
     Push,
@@ -63,6 +69,7 @@ impl Step {
             Step::Hardware => "detect the hardware",
             Step::Restore if carries(plan) => "restore carried state",
             Step::Restore => "set up passwords and keys",
+            Step::SecureBoot => "enroll secure boot keys",
             Step::Commit => "commit the settings",
             Step::Install => "install the system",
             Step::Push => "push to github",
@@ -90,7 +97,12 @@ pub fn plan_steps(plan: &Plan) -> Vec<Step> {
     if plan.host.is_new() {
         v.push(Step::Hardware);
     }
-    v.extend([Step::Restore, Step::Commit, Step::Install]);
+    v.push(Step::Restore);
+    // Firmware in Setup Mode: enroll the keys now, so nixos-install signs with them.
+    if plan.setup_mode {
+        v.push(Step::SecureBoot);
+    }
+    v.extend([Step::Commit, Step::Install]);
     // After a good install, before the repo is copied home (so the copy knows it's pushed).
     if plan.github.pushes() {
         v.push(Step::Push);
@@ -112,6 +124,14 @@ pub struct Run<'a> {
     pub push: PushState,
     /// gh's login was copied into the new home.
     pub gh_copied: bool,
+    /// Secure Boot keys enrolled in the firmware by this run.
+    pub sb_enrolled: bool,
+    /// meta.secretsReady (after the fork's edits).
+    pub secrets_ready: bool,
+    /// .sops.yaml got this host's key (part of the install commit).
+    pub sops_edited: bool,
+    /// The NetBird login made on the installer ("ip (fqdn)").
+    pub netbird: Option<String>,
     pub outcome: Option<Outcome>,
 }
 
@@ -126,6 +146,10 @@ impl<'a> Run<'a> {
             host_key_carried: false,
             push: PushState::default(),
             gh_copied: false,
+            sb_enrolled: false,
+            secrets_ready: false,
+            sops_edited: false,
+            netbird: None,
             outcome: None,
         }
     }
@@ -139,6 +163,7 @@ impl<'a> Run<'a> {
             Step::Disks => self.disks(),
             Step::Hardware => self.hardware(),
             Step::Restore => self.restore(),
+            Step::SecureBoot => self.secure_boot(),
             Step::Commit => self.commit(),
             Step::Install => self.install(),
             Step::Push => self.push(),
@@ -254,6 +279,7 @@ impl<'a> Run<'a> {
             if let Some(p) = &personal {
                 edited = settings::personalise_meta(&edited, p)?;
             }
+            self.secrets_ready = settings::get_bool(&edited, "secretsReady") == Some(true);
             self.r.write(&meta_p, edited.as_bytes(), 0o644)?;
         } else {
             self.r.log(format!("edit {META_REL}: username, flakePath, timeZone, wallpaper, theme"));
@@ -283,8 +309,60 @@ impl<'a> Run<'a> {
         }
         self.r.write(&repo.join(disks_json_path(host)), settings::disks_json(plan).as_bytes(), 0o644)?;
         paths.push(disks_json_path(host));
+        if let Some(p) = self.host_key()? {
+            paths.push(p);
+        }
         self.r.run(self.git().arg("add").arg("--").args(&paths))?;
         Ok(())
+    }
+
+    /// The SSH host key (also the sops age key), known before the settings
+    /// commit: the carried one, or a new one made in HOST_KEY_WORK (copied to
+    /// /persistent in restore). A new key is added to .sops.yaml so the other
+    /// machines re-encrypt the secrets for it (not in a fork: its secrets are
+    /// its own). Returns .sops.yaml when it was edited.
+    fn host_key(&mut self) -> Result<Option<String>> {
+        let plan = self.plan;
+        let host = self.host();
+        let carried_key = carry_dir().join("etc/ssh").join(HOST_KEY_NAME);
+        self.host_key_carried = plan.carry.contains(&Carry::HostKey)
+            && plan.previous.as_ref().is_some_and(|p| p.available.contains(&Carry::HostKey))
+            && self.r.exists(&carried_key, true)
+            && self.r.exists(&pub_of(&carried_key), true);
+        let key = if self.host_key_carried {
+            carried_key
+        } else {
+            let dir = Path::new(HOST_KEY_WORK);
+            self.r.mkdir(Path::new(WORK), 0o700)?;
+            self.r.remove(dir)?;
+            self.r.mkdir(dir, 0o700)?;
+            let key = dir.join(HOST_KEY_NAME);
+            self.r.run(
+                Cmd::new("ssh-keygen")
+                    .args(["-q", "-t", "ed25519", "-N", "", "-C", &format!("root@{}", plan.settings.hostname), "-f"])
+                    .arg(key.to_string_lossy()),
+            )?;
+            key
+        };
+        let pubkey = self.r.read(&pub_of(&key), "ssh-ed25519 AAAAdryrun root@arc")?;
+        self.age = self
+            .r
+            .run(Cmd::new("ssh-to-age").stdin(pubkey.into_bytes()).fake("age1dryrunxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))?
+            .trim()
+            .to_string();
+        if self.host_key_carried || plan.github.is_fork() {
+            return Ok(None);
+        }
+        let p = plan.flake.join(SOPS_REL);
+        let before = self.r.read(&p, crate::sops::SAMPLE)?;
+        let after = crate::sops::set_host(&before, host, &self.age, host)
+            .with_context(|| format!("couldn't add {host} to {SOPS_REL}: add it later with vx secrets add-host"))?;
+        if after != before {
+            self.r.log(format!("edit {SOPS_REL}: {host} becomes a recipient of the secrets"));
+            self.r.write(&p, after.as_bytes(), 0o644)?;
+        }
+        self.sops_edited = true;
+        Ok(Some(SOPS_REL.to_string()))
     }
 
     // ------------------------------------------------------------ 3b. hardware
@@ -314,7 +392,11 @@ impl<'a> Run<'a> {
     /// so the installed system's flake revision is the pushed one).
     fn commit(&mut self) -> Result<()> {
         let host = self.host();
-        self.r.run(self.git().args(["add", "-A", "--", META_REL, &host_dir(host)]))?;
+        let mut paths = vec![META_REL.to_string(), host_dir(host)];
+        if self.sops_edited {
+            paths.push(SOPS_REL.to_string());
+        }
+        self.r.run(self.git().args(["add", "-A", "--"]).args(&paths))?;
         // Nothing staged (a second run with the same choices): no commit needed.
         let clean = self.r.check(self.git().args(["diff", "--cached", "--quiet"]), false)?;
         if clean {
@@ -440,26 +522,21 @@ impl<'a> Run<'a> {
             }
         }
 
-        // SSH host key (also the sops age key).
-        let key = pers.join("etc/ssh/ssh_host_ed25519_key");
-        let pub_ = pers.join("etc/ssh/ssh_host_ed25519_key.pub");
-        self.host_key_carried = plan.carry.contains(&Carry::HostKey) && self.r.exists(&key, true) && self.r.exists(&pub_, true);
+        // SSH host key (also the sops age key): made in settings, unless carried.
+        let ssh = pers.join("etc/ssh");
         if !self.host_key_carried {
-            self.r.mkdir(&pers.join("etc/ssh"), 0o755)?;
-            self.r.remove(&key)?;
-            self.r.remove(&pub_)?;
-            self.r.run(
-                Cmd::new("ssh-keygen")
-                    .args(["-q", "-t", "ed25519", "-N", "", "-C", &format!("root@{}", plan.settings.hostname), "-f"])
-                    .arg(key.to_string_lossy()),
-            )?;
+            let made = Path::new(HOST_KEY_WORK).join(HOST_KEY_NAME);
+            self.r.mkdir(&ssh, 0o755)?;
+            self.r.copy_file(&made, &ssh.join(HOST_KEY_NAME), 0o600)?;
+            self.r.copy_file(&pub_of(&made), &pub_of(&ssh.join(HOST_KEY_NAME)), 0o644)?;
+        } else if self.secrets_ready {
+            // The old key decrypts already: the first boot has nothing to wait for.
+            let ok = mnt(SECRETS_OK);
+            self.r.mkdir(ok.parent().unwrap(), 0o700)?;
+            self.r.write(&ok, b"", 0o644)?;
         }
-        let pubkey = self.r.read(&pub_, "ssh-ed25519 AAAAdryrun root@arc")?;
-        self.age = self
-            .r
-            .run(Cmd::new("ssh-to-age").stdin(pubkey.into_bytes()).fake("age1dryrunxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))?
-            .trim()
-            .to_string();
+
+        self.netbird_login()?;
 
         // Data drive keys, for unlocking at boot.
         let enc = encrypted_data(plan);
@@ -473,6 +550,95 @@ impl<'a> Run<'a> {
 
         stage_secure_boot_keys(&self.r, plan)?;
         self.tpm_enroll_key()
+    }
+
+    /// The NetBird login made on the installer: `netbird down` (the installer
+    /// and the new system never use the key at once), then its whole state
+    /// folder into /persistent.
+    fn netbird_login(&mut self) -> Result<()> {
+        let plan = self.plan;
+        if !plan.netbird || (plan.carry.contains(&Carry::NetBird) && plan.previous.is_some()) {
+            return Ok(());
+        }
+        if !netbird::logged_in(&self.r) {
+            self.r.log("no netbird login on the installer: log in later with sudo netbird up");
+            return Ok(());
+        }
+        netbird::stop();
+        self.netbird = netbird::status(&self.r).ok().map(|s| s.show());
+        if let Err(e) = self.r.run(netbird::down_cmd()) {
+            self.r.log(format!("netbird down failed ({e:#}): copying the login anyway"));
+        }
+        let to = mnt(&format!("/persistent{NETBIRD_STATE}"));
+        self.r.mkdir(&to, 0o700)?;
+        self.r.run(netbird::copy_cmd(&to))?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ 4c. secure boot
+
+    /// The firmware is in Setup Mode: our keys (carried, else new) go in now,
+    /// with Microsoft's (Windows and the GPU's option ROM need them), and into
+    /// the new system so nixos-install signs the boot files with them.
+    fn secure_boot(&mut self) -> Result<()> {
+        if !self.r.dry() && !finish::setup_mode() {
+            self.r.log("the firmware isn't in setup mode: the new system makes and enrolls its keys later");
+            return Ok(());
+        }
+        let plan = self.plan;
+        let iso = Path::new(SBCTL_DIR);
+        let carried = mnt(&format!("/persistent{SBCTL_DIR}"));
+        let use_carried =
+            plan.carry.contains(&Carry::SecureBoot) && plan.previous.is_some() && self.r.exists(&carried.join("keys"), true);
+        self.r.remove(iso)?;
+        if use_carried {
+            self.r.mkdir(iso, 0o700)?;
+            self.r.run(Cmd::new("rsync").args(["-aHAX", &format!("{}/", carried.display()), &format!("{SBCTL_DIR}/")]))?;
+        } else {
+            self.r.run(Cmd::new("sbctl").arg("create-keys"))?;
+        }
+        let vars = self.immutable_candidates();
+        if !vars.is_empty()
+            && let Err(e) = self.r.run(Cmd::new("chattr").arg("-i").args(&vars))
+        {
+            self.r.log(format!("chattr -i failed ({e:#}): trying to enroll anyway"));
+        }
+        self.r.run(Cmd::new("sbctl").args(["enroll-keys", "--microsoft"]))?;
+        for to in [mnt(&format!("/persistent{SBCTL_DIR}")), mnt(SBCTL_DIR)] {
+            if to == carried && use_carried {
+                continue;
+            }
+            self.r.mkdir(&to, 0o700)?;
+            self.r.run(Cmd::new("rsync").args(["-aHAX", &format!("{SBCTL_DIR}/"), &format!("{}/", to.display())]))?;
+        }
+        self.sb_enrolled = true;
+        Ok(())
+    }
+
+    /// PK/KEK/db/dbx in efivarfs (may be immutable; enrolling writes them).
+    fn immutable_candidates(&self) -> Vec<String> {
+        if self.r.dry() {
+            return [
+                "PK-8be4df61-93ca-11d2-aa0d-00e098032b8c",
+                "KEK-8be4df61-93ca-11d2-aa0d-00e098032b8c",
+                "db-d719b2cb-3d3a-4596-a3bc-dad00e67656f",
+                "dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f",
+            ]
+            .iter()
+            .map(|n| format!("{EFIVARS}/{n}"))
+            .collect();
+        }
+        let mut v: Vec<String> = std::fs::read_dir(EFIVARS)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| SB_VARS.iter().any(|p| n.starts_with(p)))
+                    .map(|n| format!("{EFIVARS}/{n}"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort();
+        v
     }
 
     /// A one-time key the first boot uses to enroll the TPM (then removes).
@@ -573,6 +739,7 @@ impl<'a> Run<'a> {
     fn finish(&mut self) -> Result<()> {
         let plan = self.plan;
         let snapshot = self.r.exists(Path::new(SNAPSHOT_MARK), false);
+        netbird::stop();
         cleanup_secrets(&self.r);
         self.r.remove(&carry_dir())?;
         // The system is installed by now: trouble letting go of the drives is
@@ -590,34 +757,43 @@ impl<'a> Run<'a> {
             (_, false, _) => PushState::Off,
             (_, true, p) => p.clone(),
         };
+        let sb_carried = plan.carry.contains(&Carry::SecureBoot) && plan.previous.is_some();
         let input = NextInput {
-            sb_carried: plan.carry.contains(&Carry::SecureBoot) && plan.previous.is_some(),
-            setup_mode: !self.r.dry() && finish::setup_mode(),
+            sb_carried,
+            sb_enrolled: self.sb_enrolled,
             tpm: plan.system.encrypt && plan.system.tpm,
-            host_key_new: !self.host_key_carried,
-            age: self.age.clone(),
-            netbird_carried: plan.carry.contains(&Carry::NetBird) && plan.previous.is_some(),
-            snapshot,
-            gh_copied: self.gh_copied,
-            fork: plan.github.is_fork(),
-            push: push.clone(),
+            secrets_pending: self.secrets_pending(),
         };
-        let (pushed, not_pushed) = match &push {
-            PushState::Pushed(s) => (Some(s.clone()), None),
-            PushState::Offline => (None, Some("offline: committed in ~/nixos only".to_string())),
-            PushState::Off => (None, Some("you chose not to push".to_string())),
-            PushState::Failed(e) => (None, Some(format!("the push failed: {e}"))),
-            PushState::NotPushed(why) => (None, Some(why.clone())),
-        };
+        let netbird_carried = plan.carry.contains(&Carry::NetBird) && plan.previous.is_some();
         self.outcome = Some(Outcome {
             age_key: self.age.clone(),
             host_key_carried: self.host_key_carried,
             next_steps: finish::next_steps(&input),
-            pushed,
-            not_pushed,
+            pushed: match &push {
+                PushState::Pushed(s) => Some(s.clone()),
+                _ => None,
+            },
+            not_pushed: finish::not_pushed(&push, snapshot),
+            sb_enrolled: self.sb_enrolled,
+            secrets_pending: self.secrets_pending(),
+            netbird: if netbird_carried { Some("carried over".into()) } else { self.netbird.clone() },
         });
         Ok(())
     }
+}
+
+impl Run<'_> {
+    /// Secrets are on, and this new host waits for another machine to re-encrypt them.
+    fn secrets_pending(&self) -> bool {
+        self.secrets_ready && !self.host_key_carried && !self.plan.github.is_fork()
+    }
+}
+
+/// `<key>.pub`
+fn pub_of(key: &Path) -> PathBuf {
+    let mut s = key.as_os_str().to_owned();
+    s.push(".pub");
+    PathBuf::from(s)
 }
 
 fn first_line(s: &str) -> String {

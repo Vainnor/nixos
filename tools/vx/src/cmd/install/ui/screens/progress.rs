@@ -72,14 +72,24 @@ pub fn summary_rows(app: &App, w: usize) -> Vec<Row> {
     if !o.age_key.is_empty() {
         r.push(Row::info(Line::from(vec![Span::styled("age key   ", t.muted()), Span::styled(o.age_key.clone(), t.accent())])));
     }
-    r.push(if o.host_key_carried {
-        Row::colored(t.green, "secrets already work: the old ssh host key was carried over")
-    } else {
-        Row::colored(t.yellow, "secrets need the new key (see below)")
-    });
+    if o.host_key_carried {
+        r.push(Row::colored(t.green, "secrets already work: the old ssh host key was carried over"));
+    } else if o.secrets_pending {
+        r.push(Row::colored(t.yellow, "secrets arrive once another machine re-encrypts them (see below)"));
+    }
+    if o.sb_enrolled {
+        r.push(Row::colored(t.green, "secure boot keys enrolled (yours + microsoft's)"));
+    }
+    if let Some(n) = &o.netbird {
+        r.push(Row::colored(t.green, format!("netbird: {n}")));
+    }
     match (&o.pushed, &o.not_pushed) {
         (Some(p), _) => r.push(Row::colored(t.green, format!("pushed to github: {p}"))),
-        (None, Some(why)) => r.push(Row::colored(t.yellow, format!("not pushed: {why}"))),
+        (None, Some(why)) => {
+            for l in wrap(&format!("not pushed: {why}"), w.saturating_sub(1)) {
+                r.push(Row::colored(t.yellow, l));
+            }
+        }
         (None, None) => {}
     }
     r.push(Row::blank());
@@ -91,6 +101,7 @@ pub fn summary_rows(app: &App, w: usize) -> Vec<Row> {
     }
     r.push(Row::blank());
     r.push(button_row(t, Field::Reboot, "reboot"));
+    r.push(button_row(t, Field::RebootFirmware, "reboot into bios"));
     r.push(button_row(t, Field::Shell, "shell"));
     r.push(Row::muted(t, format!("log: {LOG_FILE}")));
     r
@@ -123,5 +134,9 @@ pub fn act(app: &mut App, f: Field, a: Act) {
     if !matches!(a, Act::Select | Act::Toggle) {
         return;
     }
-    app.exit = Some(if f == Field::Reboot { Exit::Reboot } else { Exit::Shell });
+    app.exit = Some(match f {
+        Field::Reboot => Exit::Reboot,
+        Field::RebootFirmware => Exit::Firmware,
+        _ => Exit::Shell,
+    });
 }

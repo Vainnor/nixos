@@ -3,6 +3,7 @@
 mod disks;
 pub mod github;
 mod machine;
+mod netbird;
 mod options;
 mod previous;
 mod progress;
@@ -24,6 +25,7 @@ pub fn rows(app: &App, width: u16) -> Vec<Row> {
         Screen::GitHub => github::rows(app, w),
         Screen::Machine => machine::rows(app, w),
         Screen::Previous => previous::rows(app, w),
+        Screen::NetBird => netbird::rows(app, w),
         Screen::System => disks::system_rows(app, w),
         Screen::Data => disks::data_rows(app, w),
         Screen::Options => options::rows(app, w),
@@ -46,6 +48,8 @@ pub fn act(app: &mut App, f: Field, a: Act) {
     match f {
         Field::FetchLatest | Field::Start => welcome::act(app, f, a),
         Field::GhLogin | Field::GhCancel | Field::GhSkip | Field::GhPush | Field::GhFork | Field::GhQuit => github::act(app, f, a),
+        Field::NbLogin | Field::NbCancel | Field::NbSkip => netbird::act(app, f, a),
+        Field::RebootFirmware if app.screen == Screen::Welcome => welcome::act(app, f, a),
         Field::Host(_) | Field::NewHost | Field::Aspect(_) | Field::Gpu => machine::act(app, f, a),
         Field::Unlock | Field::SkipPrevious | Field::Carry(_) | Field::CarryNone | Field::Home(_) | Field::Backup(_) | Field::Rescan => {
             previous::act(app, f, a)
@@ -62,7 +66,7 @@ pub fn act(app: &mut App, f: Field, a: Act) {
                 app.next();
             }
         }
-        Field::Reboot | Field::Shell => progress::act(app, f, a),
+        Field::Reboot | Field::RebootFirmware | Field::Shell => progress::act(app, f, a),
         _ => {}
     }
 }

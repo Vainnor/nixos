@@ -3,6 +3,7 @@
 //! demo only fakes what a Mac can't provide: disks, the machine, install data.
 
 use super::super::engine::github::{Account, DeviceCode, Fork};
+use super::super::engine::netbird;
 use super::super::engine::{self, Mode};
 use super::super::plan::{DiskInfo, Event, InstallData, Machine, Plan, Previous, Secret, Unlocked};
 use super::super::probe::{self, BackupTarget};
@@ -91,6 +92,20 @@ impl Backend {
 
     pub fn gh_fork(self, owner: &str, repo: &str, login: &str) -> (Result<Fork>, Vec<String>) {
         engine::gh_fork(owner, repo, login, self.mode())
+    }
+
+    // NetBird: the demo and --dry-run pretend (a fake link and code).
+
+    pub fn nb_start(self, host: &str) -> (Result<netbird::Start>, Vec<String>) {
+        engine::nb_start(host, self.mode())
+    }
+
+    pub fn nb_wait(self, cancel: &AtomicBool) -> (Result<netbird::Status>, Vec<String>) {
+        engine::nb_wait(cancel, self.mode())
+    }
+
+    pub fn nb_stop(self) {
+        engine::nb_stop();
     }
 
     pub fn unlock(self, prev: &Previous, password: Option<&Secret>) -> Result<Unlocked> {

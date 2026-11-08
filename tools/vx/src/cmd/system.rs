@@ -449,6 +449,13 @@ fn sync(ctx: &Ctx, message: &str, yes: bool) -> Result<()> {
     }
     ui::heading("push");
     push(ctx)?;
+    // The Mac holds the editing key: re-encrypt for machines added to .sops.yaml.
+    if ctx.host == Host::Mac && super::care::secrets::mac_age_key().is_some() {
+        ui::heading("secrets");
+        if let Err(e) = super::care::secrets::rekey(ctx, true) {
+            ui::warn(&format!("couldn't re-encrypt the secrets: {e:#}"));
+        }
+    }
     ui::heading("switch");
     switch(ctx)?;
     let other = match ctx.host {

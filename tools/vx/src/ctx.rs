@@ -50,11 +50,17 @@ pub fn host_from(hostname: Option<&str>) -> String {
 impl Ctx {
     pub fn new(repo: Option<PathBuf>, verbose: bool) -> Result<Self> {
         let host = if cfg!(target_os = "macos") { Host::Mac } else { Host::NixOs };
-        let home = PathBuf::from(std::env::var("HOME").context("HOME is not set")?);
-        let repo = repo.unwrap_or_else(|| match host {
-            Host::Mac => home.join("Programing/nixos"),
-            Host::NixOs => home.join("nixos"),
-        });
+        // Services (vx secrets wait/rekey as root) pass VX_REPO and may have no HOME.
+        let repo = match repo {
+            Some(r) => r,
+            None => {
+                let home = PathBuf::from(std::env::var("HOME").context("HOME is not set (pass --repo or set VX_REPO)")?);
+                match host {
+                    Host::Mac => home.join("Programing/nixos"),
+                    Host::NixOs => home.join("nixos"),
+                }
+            }
+        };
         Ok(Self { repo, host, verbose, nixos_host: nixos_host() })
     }
 
