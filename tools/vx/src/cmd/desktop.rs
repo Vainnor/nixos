@@ -45,6 +45,9 @@ pub enum WallpaperCmd {
     Set {
         /// A folder in assets/wallpapers
         name: Option<String>,
+        /// Only record it in meta.nix (the shell's picker already changed it live); the next switch builds it in
+        #[arg(long)]
+        no_switch: bool,
     },
     /// List the wallpapers (the current one is marked)
     List,
@@ -134,8 +137,8 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
     match cmd {
         Cmd::Wallpapers => wallpaper::list(ctx),
         Cmd::Wallpaper(a) => match a.cmd {
-            None => wallpaper::set(ctx, a.name),
-            Some(WallpaperCmd::Set { name }) => wallpaper::set(ctx, name),
+            None => wallpaper::set(ctx, a.name, true),
+            Some(WallpaperCmd::Set { name, no_switch }) => wallpaper::set(ctx, name, !no_switch),
             Some(WallpaperCmd::List) => wallpaper::list(ctx),
             Some(WallpaperCmd::Try { name }) => wallpaper::try_(ctx, &name),
             Some(WallpaperCmd::Add { name, wide, uhd }) => wallpaper::add(ctx, &name, &wide, &uhd),
@@ -297,7 +300,7 @@ mod tests {
         assert!(matches!(parse(&["wallpaper", "list"]), Cmd::Wallpaper(WallpaperArgs { cmd: Some(WallpaperCmd::List), .. })));
         assert!(matches!(
             parse(&["wallpaper", "set", "noir"]),
-            Cmd::Wallpaper(WallpaperArgs { cmd: Some(WallpaperCmd::Set { name: Some(_) }), .. })
+            Cmd::Wallpaper(WallpaperArgs { cmd: Some(WallpaperCmd::Set { name: Some(_), .. }), .. })
         ));
         assert!(matches!(
             parse(&["wallpaper", "try", "noir"]),

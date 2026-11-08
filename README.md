@@ -444,6 +444,10 @@ Each wallpaper is a folder in `assets/wallpapers/`: `wide.png` (3440x1440) goes 
 `4k.png` on the left monitor and the Mac, and `theme.nix` is a palette made from the image. Every
 themed app (the shell, borders, terminal, LibreWolf, GTK, Qt, the lock screen) follows it.
 
+**Super+W** (or **[ wallpaper ]** in the control center) picks one live: the new image fades in,
+and the shell, Mango's borders and Ghostty change colour with it. No rebuild, no password. It's
+written to `meta.nix` too, so GTK apps and the greeter follow at the next `vx switch`.
+
 ```sh
 vx wallpapers                       # list them; * marks the current one
 vx wallpaper pinewood               # switch wallpaper + colours and rebuild this machine

@@ -143,30 +143,6 @@ in
     let
       c = config.lib.stylix.colors;
       argb = hex: "0x${hex}ff";
-      wallpaper = pkgs.writeShellApplication {
-        name = "set-wallpaper";
-        runtimeInputs = [
-          pkgs.swaybg
-          pkgs.wlr-randr
-          pkgs.jq
-        ];
-        text =
-          if palette.wallpapers == null then
-            "exec swaybg -m fill -i ${config.stylix.image}"
-          else
-            ''
-              # Wait for the outputs, then one image per screen by its shape.
-              for _ in $(seq 20); do wlr-randr --json >/dev/null 2>&1 && break; sleep 0.25; done
-              args=()
-              while read -r name w h; do
-                if [ $((w * 10 / h)) -ge 20 ]; then img=${palette.wallpapers.wide}; else img=${palette.wallpapers.uhd}; fi
-                args+=(-o "$name" -m fill -i "$img")
-              done < <(wlr-randr --json | jq -r '.[] | select(.enabled) | . as $o | ($o.modes[] | select(.current)) as $m | "\($o.name) \($m.width) \($m.height)"')
-              pkill -x swaybg || true # one started some other way (an older login)
-              if [ ''${#args[@]} -eq 0 ]; then exec swaybg -m fill -i ${palette.wallpapers.wide}; fi
-              exec swaybg "''${args[@]}"
-            '';
-      };
       border = if palette.extra.border != null then palette.extra.border else c.base02;
 
       # Qt colours for qt5ct/qt6ct, one entry per QPalette role in Qt's order:
@@ -279,22 +255,7 @@ in
         cursor_size = 24;
       };
 
-      # Wallpaper from meta.wallpaper (see flake/meta.nix): with a wallpaper
-      # folder, wide screens (the ultrawide) get wide.png and the rest get 4k.png.
-      # A user service, so a rebuild with a new wallpaper restarts it right away
-      # (an autostart line would only pick it up at the next login).
-      systemd.user.services.wallpaper = {
-        Unit = {
-          Description = "Wallpaper (swaybg)";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
-        };
-        Service = {
-          ExecStart = lib.getExe wallpaper;
-          Restart = "on-failure";
-          RestartSec = 2;
-        };
-        Install.WantedBy = [ "graphical-session.target" ];
-      };
+      # The wallpaper itself is drawn by vshell (shell/wallpaper/Background.qml),
+      # which can change it live with a fade; see modules/desktop/shell.nix.
     };
 }

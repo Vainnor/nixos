@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.services
 
 // Colours, font and sizes for the whole shell. Nix writes the palette to
 // $VSHELL_THEME (JSON: base00..base0F, border, accent2, primaryModel); without
@@ -10,6 +11,9 @@ Singleton {
     id: root
 
     property var raw: ({})
+    // The live wallpaper's palette (services/Wallpaper.qml), over raw: picking
+    // a wallpaper recolours the shell before any rebuild.
+    readonly property var live: Wallpaper.liveColors
 
     FileView {
         path: Quickshell.env("VSHELL_THEME") ?? ""
@@ -25,7 +29,8 @@ Singleton {
     }
 
     function hex(key, fallback) {
-        return raw[key] ? "#" + raw[key] : fallback;
+        const v = live[key] ?? raw[key];
+        return v ? "#" + v : fallback;
     }
 
     // base16 roles

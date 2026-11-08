@@ -116,7 +116,7 @@ pub fn set_meta(text: &str, n: &str) -> String {
 }
 
 /// `vx wallpaper [name]` / `vx wallpaper set <name>`.
-pub fn set(ctx: &Ctx, name: Option<String>) -> Result<()> {
+pub fn set(ctx: &Ctx, name: Option<String>, switch: bool) -> Result<()> {
     let repo = ctx.repo()?;
     let n = match name {
         Some(n) => n,
@@ -133,6 +133,10 @@ pub fn set(ctx: &Ctx, name: Option<String>) -> Result<()> {
     let text = std::fs::read_to_string(&meta).with_context(|| format!("could not read {}", meta.display()))?;
     std::fs::write(&meta, set_meta(&text, &n)).with_context(|| format!("could not write {}", meta.display()))?;
     ctx.run(ctx.cmd("git").args(["add", "-A", "assets/wallpapers", "modules/flake/meta.nix"]))?;
+    if !switch {
+        ui::ok(&format!("{n} recorded in meta.nix: the next vx switch builds it into everything"));
+        return Ok(());
+    }
     vx_switch(ctx)?;
     ui::ok(&format!("now: {n}. commit it with: vx commit 'style: wallpaper {n}'"));
     Ok(())

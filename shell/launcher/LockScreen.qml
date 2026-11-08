@@ -6,7 +6,7 @@ import qs.common
 import qs.services
 
 // Session lock (ext-session-lock-v1) while Session.locked. Every screen gets a
-// surface with the wallpaper ($VSHELL_WALLPAPER, else flat Theme.bg) and a
+// surface with the wallpaper (services/Wallpaper.qml, else flat Theme.bg) and a
 // clock box; the primary screen also shows the password field. Keys typed on
 // any screen feed the same password buffer, so it doesn't matter which lock
 // surface the compositor focuses.
@@ -20,7 +20,6 @@ Scope {
     property string pending: ""         // password handed to PAM
     property string error: ""
     readonly property bool busy: pam.active
-    readonly property string wallpaper: Quickshell.env("VSHELL_WALLPAPER") ?? ""
 
     function submit() {
         if (busy || buffer === "") return;
@@ -107,9 +106,10 @@ Scope {
                 }
 
                 Image {
+                    readonly property string wall: Wallpaper.image(surf.screen)
                     anchors.fill: parent
-                    visible: root.wallpaper !== "" && status === Image.Ready
-                    source: root.wallpaper !== "" ? "file://" + root.wallpaper : ""
+                    visible: wall !== "" && status === Image.Ready
+                    source: wall !== "" ? "file://" + wall : ""
                     fillMode: Image.PreserveAspectCrop
                     sourceSize { width: surf.width; height: surf.height }
                     asynchronous: true

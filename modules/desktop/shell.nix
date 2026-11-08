@@ -86,14 +86,28 @@ in
         )
       );
       ipc = "vshell ipc call";
+      # The live wallpaper (shell/services/Wallpaper.qml): what was picked
+      # since the last switch, and the Mango / Ghostty colours to match.
+      stateDir = "${config.xdg.stateHome}/vshell";
     in
     {
+      # Picking a wallpaper needs no rebuild: Mango and Ghostty include the
+      # colours the shell writes (both optional, so nothing breaks without them).
+      wayland.windowManager.mango.extraConfig = lib.mkAfter ''
+        source_optional=${stateDir}/mango.conf
+      '';
+      programs.ghostty.settings.config-file = "?${stateDir}/ghostty";
+      # A switch builds the picked wallpaper into everything (vx wallpaper set
+      # wrote it to meta.nix), so the live overrides go.
+      home.activation.vshellLiveWallpaper = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        run rm -f ${stateDir}/wallpaper ${stateDir}/mango.conf ${stateDir}/ghostty
+      '';
+
       home.packages = [
         vshell
         pkgs.quickshell # `qs` for `vx shell dev`
       ]
       ++ (with pkgs; [
-        swaybg # the wallpaper picker swaps the wallpaper at once, before the rebuild
         libqalculate # calculator tab
         fd # files tab
         wl-clipboard
@@ -121,12 +135,16 @@ in
             "VSHELL_WALLPAPER=${wallpaper}"
             "VSHELL_WALLPAPER_NAME=${toString meta.wallpaper}"
             "VSHELL_WALLPAPERS=${wallpapers}"
+            "VSHELL_STATE=${stateDir}"
             "VSHELL_AUDIO_OUTPUT=${toString host.audioOutput}"
             # Programs the shell starts (nmcli, cliphist, qalc, mmsg, sudo, ...).
             "PATH=/run/wrappers/bin:/etc/profiles/per-user/${meta.username}/bin:/run/current-system/sw/bin"
           ];
           Restart = "on-failure";
           RestartSec = 1;
+          # Restarting the shell stops only the shell: anything it started
+          # (apps run their own scopes anyway) keeps running.
+          KillMode = "process";
         };
         Install.WantedBy = [ "graphical-session.target" ];
       };

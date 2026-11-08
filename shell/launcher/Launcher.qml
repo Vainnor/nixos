@@ -178,7 +178,13 @@ Overlay {
         h[entry.id] = (h[entry.id] ?? 0) + 1;
         history = h;
         historyFile.setText(JSON.stringify(h));
-        entry.execute();
+        // Its own systemd scope, not the shell's service: restarting the shell
+        // (a switch, a crash) must never take the apps it started with it.
+        const cmd = entry.runInTerminal ? ["ghostty", "-e"].concat(entry.command) : entry.command;
+        const unit = "app-vshell-" + String(entry.id).replace(/[^A-Za-z0-9_.-]/g, "_") + "-" + Date.now();
+        const ctx = { command: ["systemd-run", "--user", "--scope", "--slice=app.slice", "--collect", "--quiet", "--unit=" + unit, "--"].concat(cmd) };
+        if (entry.workingDirectory) ctx.workingDirectory = entry.workingDirectory;
+        Quickshell.execDetached(ctx);
         Panels.close();
     }
 

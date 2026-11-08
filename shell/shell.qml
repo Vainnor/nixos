@@ -30,6 +30,7 @@ ShellRoot {
     Launcher {}
     PowerMenu {}
     LockScreen {}
+    Background {}
     WallpaperPicker {}
 
     // Keybinds and scripts talk to the shell through these:
@@ -53,6 +54,11 @@ ShellRoot {
         target: "notifications"
         function clear(): void { Notifs.clear(); }
         function dnd(): void { Notifs.dnd = !Notifs.dnd; }
+    }
+    IpcHandler {
+        target: "wallpaper"
+        function set(name: string): void { Wallpaper.set(name); }
+        function get(): string { return Wallpaper.name; }
     }
     IpcHandler {
         target: "lock"

@@ -3,29 +3,19 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.common
+import qs.services
 
-// Super+W: every wallpaper as a thumbnail with its palette. Picking one swaps
-// the wallpaper and recolours the shell straight away, then opens a small
-// terminal running `vx wallpaper <name>` (asks for your password, rebuilds),
-// after which GTK apps, the terminal, Mango and the lock screen follow.
+// Super+W: every wallpaper as a thumbnail with its palette. Picking one
+// changes it right away, with a fade (services/Wallpaper.qml): the shell,
+// Mango's borders and Ghostty follow at once; GTK apps and the greeter at the
+// next `vx switch`. No rebuild, no password.
 Overlay {
     id: root
     name: "wallpaper"
 
-    property var walls: []
-    property string current: Quickshell.env("VSHELL_WALLPAPER_NAME") ?? ""
+    readonly property var walls: Wallpaper.walls
+    readonly property string current: Wallpaper.name
     property int sel: 0
-
-    FileView {
-        path: Quickshell.env("VSHELL_WALLPAPERS") ?? ""
-        onLoaded: {
-            try {
-                root.walls = JSON.parse(text());
-            } catch (e) {
-                console.warn("wallpapers: " + e);
-            }
-        }
-    }
 
     onVisibleChanged: {
         if (!visible) return;
@@ -36,17 +26,7 @@ Overlay {
     }
 
     function apply(w) {
-        // 1. the shell's colours, now
-        Theme.raw = Object.assign({}, Theme.raw, w.colors);
-        // 2. the wallpaper, now: wide image on wide screens, 4K one elsewhere
-        const args = [];
-        for (const s of Quickshell.screens)
-            args.push("-o", s.name, "-m", "fill", "-i", s.width / s.height >= 2 ? w.wide : w.uhd);
-        Quickshell.execDetached(["sh", "-c", "pkill -x swaybg; exec swaybg \"$@\"", "swaybg"].concat(args));
-        // 3. everything else: rebuild with the new theme
-        Quickshell.execDetached(["ghostty", "--title=vx-rebuild", "-e", "sh", "-c",
-            "vx wallpaper \"$1\"; echo; printf 'enter to close '; read -r _", "sh", w.name]);
-        current = w.name;
+        Wallpaper.set(w.name);
         Panels.close();
     }
 
@@ -151,7 +131,7 @@ Overlay {
         }
 
         Txt {
-            text: "arrows / hjkl move · enter applies · the rest of the desktop follows after the rebuild"
+            text: "arrows / hjkl move · enter applies · gtk apps and the greeter follow at the next vx switch"
             color: Theme.muted
             font.pixelSize: Theme.fontSmall
         }
