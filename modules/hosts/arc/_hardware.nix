@@ -11,7 +11,8 @@
     "usb_storage"
     "sd_mod"
   ];
-  # amdgpu in the initrd: see virtualisation/vm.nix (meta.vfio.reserveGpu).
+  # amdgpu in the initrd: system/gpu.nix (gpu "amd" in host.json; skipped when
+  # vfio.nix reserves the card).
   boot.kernelModules = [ "kvm-amd" ];
 
   # Zen 5, single CCD: no V-Cache core parking needed.

@@ -3,7 +3,12 @@
 # palette (console.colors), so the greeter follows the theme too.
 {
   flake.modules.nixos.desktop =
-    { pkgs, lib, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      ...
+    }:
     let
       theme = lib.concatStringsSep ";" [
         "border=blue"
@@ -29,7 +34,7 @@
           command = lib.concatStringsSep " " [
             (lib.getExe pkgs.tuigreet)
             "--time --time-format '%a %d %b  %H:%M'"
-            "--greeting 'arc'"
+            "--greeting '${config.networking.hostName}'"
             "--remember --asterisks"
             "--theme '${theme}'"
             "--cmd '${session}'"

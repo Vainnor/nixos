@@ -4,9 +4,12 @@
 #   sudo nix --extra-experimental-features 'nix-command flakes' run github:vainnor/nixos
 #
 # The custom ISO (hosts/installer.nix) starts it by itself. It lets you pick
-# the system drive and data drives, carries state over from a previous
-# install, writes modules/hosts/arc/disks.json and the meta edits into its
-# repo copy, then runs disko (hosts/arc/_disko.nix) and nixos-install.
+# the machine (reinstall an existing host, or a new one that gets its own
+# modules/hosts/<name>/ with host.json, _hardware.nix and disks.json; see
+# flake/hosts.nix), the system drive and data drives, carries state over from
+# a previous install, writes the host folder and the meta edits into its repo
+# copy, runs disko (hosts/_disko.nix) and nixos-install, then commits and
+# pushes (to your fork unless you are the owner).
 #
 #   packages.<system>.install-data  defaults and choices for the screens (JSON;
 #                                   builds on the Mac too, for `vx install --demo`)
@@ -14,13 +17,24 @@
 #   apps.install / apps.default     the same, for `nix run`
 {
   self,
+  inputs,
   lib,
   config,
   ...
 }:
 let
   inherit (config) meta;
-  host = "arc";
+  # The default host: arc, or the first host folder in a repo without one.
+  host = if config.vx.hosts ? arc then "arc" else lib.head (builtins.attrNames config.vx.hosts);
+
+  # https://github.com/<owner>/<repo>[.git], or the SSH form <user>@github.com:<owner>/<repo>.git
+  repoMatch = builtins.match "(https://github[.]com/|[a-z]+@github[.]com:)([^/]+)/([^/]+)" meta.repoUrl;
+  repoPart =
+    i:
+    if repoMatch == null then
+      throw "meta.repoUrl must be a GitHub repo (https://github.com/<owner>/<repo>), not ${meta.repoUrl}"
+    else
+      lib.removeSuffix ".git" (lib.removeSuffix "/" (builtins.elemAt repoMatch i));
 
   # Theme files are attrsets with a `scheme`; default.nix and wallpapers.nix are functions.
   themes = lib.sort lib.lessThan (
@@ -37,7 +51,16 @@ let
 
   installData = {
     inherit host themes;
-    inherit (meta) repoUrl;
+    inherit (meta) repoUrl githubUser;
+    # The upstream repo on GitHub, from repoUrl.
+    owner = repoPart 1;
+    repo = repoPart 2;
+    # Every host folder (flake/hosts.nix), for "reinstall this machine".
+    hosts = map (h: { inherit (h) name aspects gpu; }) (builtins.attrValues config.vx.hosts);
+    # What a new machine can pick; base is always on and not listed.
+    inherit (config.vx) aspects;
+    # A new machine's stateVersion: the NixOS release it is installed with.
+    stateVersion = inputs.nixpkgs.lib.trivial.release;
     flake = "${self}";
     defaults = {
       hostname = self.nixosConfigurations.${host}.config.networking.hostName;

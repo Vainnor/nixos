@@ -1,26 +1,24 @@
 # Instant replay (like ShadowPlay): gpu-screen-recorder keeps the last two
-# minutes of meta.replayMonitor in RAM, encoded on the 7900 XTX (HEVC, near
-# zero FPS cost). Alt+F10 saves it to ~/Videos/Replays; Alt+F9 saves only the
-# last 30 seconds. Game + voice chat + mic are in the clip.
+# minutes of the host's replayMonitor (host.json) in RAM, encoded on the GPU
+# (HEVC, near zero FPS cost; on the CPU as H.264 when the host has gpu
+# "none"). Alt+F10 saves it to ~/Videos/Replays; Alt+F9 saves only the last
+# 30 seconds. Game + voice chat + mic are in the clip.
 # `systemctl --user stop gpu-screen-recorder-replay` turns it off for a session.
-{ config, ... }:
-let
-  inherit (config) meta;
-  # Everything you hear (the real output's monitor carries every channel) plus your mic.
-  audio =
-    if meta.audioOutput != null then
-      "device:${meta.audioOutput}.monitor|default_input"
-    else
-      "default_output|default_input";
-in
 {
   flake.modules.nixos.gaming = {
     programs.gpu-screen-recorder.enable = true; # setcap'd KMS capture helper
   };
 
   flake.modules.homeManager.gaming =
-    { pkgs, ... }:
+    { pkgs, osConfig, ... }:
     let
+      host = osConfig.vx.host;
+      # Everything you hear (the real output's monitor carries every channel) plus your mic.
+      audio =
+        if host.audioOutput != null then
+          "device:${host.audioOutput}.monitor|default_input"
+        else
+          "default_output|default_input";
       onSave = pkgs.writeShellScript "replay-saved" ''
         ${pkgs.libnotify}/bin/notify-send -a "instant replay" -i media-record "clip saved" "$(basename "$1")"
       '';
@@ -36,18 +34,22 @@ in
           # /run/wrappers/bin has the capability-enabled gsr-kms-server.
           Environment = "PATH=/run/wrappers/bin:${pkgs.coreutils}/bin";
           ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p %h/Videos/Replays";
-          ExecStart = builtins.concatStringsSep " " [
-            "${pkgs.gpu-screen-recorder}/bin/gpu-screen-recorder"
-            "-w ${meta.replayMonitor}"
-            "-f 60"
-            "-k hevc"
-            "-bm cbr -q 40000"
-            "-a '${audio}'"
-            "-r 120"
-            "-c mp4"
-            "-sc ${onSave}"
-            "-o %h/Videos/Replays"
-          ];
+          ExecStart = builtins.concatStringsSep " " (
+            [
+              "${pkgs.gpu-screen-recorder}/bin/gpu-screen-recorder"
+              "-w ${host.replayMonitor}"
+              "-f 60"
+            ]
+            ++ (if host.gpu == "none" then [ "-encoder cpu -k h264" ] else [ "-k hevc" ])
+            ++ [
+              "-bm cbr -q 40000"
+              "-a '${audio}'"
+              "-r 120"
+              "-c mp4"
+              "-sc ${onSave}"
+              "-o %h/Videos/Replays"
+            ]
+          );
           Restart = "on-failure";
           RestartSec = 5;
         };

@@ -9,11 +9,14 @@ let
   inherit (config) meta;
 in
 {
-  flake.darwinConfigurations.${meta.macHost} = inputs.nix-darwin.lib.darwinSystem {
-    modules = with config.flake.modules.darwin; [
-      base
-      mac
-    ];
+  # macHost = null (e.g. a fork without a Mac): no darwin config at all.
+  flake.darwinConfigurations = inputs.nixpkgs.lib.optionalAttrs (meta.macHost or null != null) {
+    ${meta.macHost} = inputs.nix-darwin.lib.darwinSystem {
+      modules = with config.flake.modules.darwin; [
+        base
+        mac
+      ];
+    };
   };
 
   flake.modules.darwin.mac =

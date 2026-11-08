@@ -124,11 +124,12 @@ in
             e2fsprogs
             rsync
             git
+            gh # GitHub login (device code), forks and pushes for new machines
             mkpasswd
             openssh
             ssh-to-age
             jq
-            pciutils
+            pciutils # lspci: the installer detects the GPU
             coreutils
           ]);
           # Also for `vx install` run by hand (sudo drops it, so vx-installer passes --data itself).
