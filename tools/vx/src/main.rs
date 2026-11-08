@@ -36,6 +36,7 @@ pub enum Cmd {
     Desktop(cmd::desktop::Cmd),
     #[command(flatten)]
     Vm(cmd::vm::Cmd),
+    Install(cmd::install::InstallArgs),
 
     /// Print shell completions (fish, bash, zsh)
     #[command(hide = true)]
@@ -72,8 +73,14 @@ fn run() -> Result<()> {
     }
 
     let cli = Cli::parse();
+    // The installer runs on the ISO, where there is no repo or home to work from.
+    let command = match cli.cmd {
+        Cmd::Install(a) => return cmd::install::run(a, cli.repo),
+        c => c,
+    };
     let ctx = ctx::Ctx::new(cli.repo.clone(), cli.verbose)?;
-    match cli.cmd {
+    match command {
+        Cmd::Install(_) => unreachable!(),
         Cmd::System(c) => cmd::system::run(&ctx, c),
         Cmd::Pkgs(c) => cmd::pkgs::run(&ctx, c),
         Cmd::Care(c) => cmd::care::run(&ctx, c),

@@ -104,8 +104,6 @@ pub enum Cmd {
     },
     /// Change your login password (stored on /persistent; applies at next login)
     Password,
-    /// From the installer USB: erase the dedicated drive and install NixOS (asks for YES)
-    Install,
     /// Build the custom installer ISO (x86_64 Linux)
     Iso,
     /// Boot arc's config in a VM window (any Linux with Nix; login vainnor / preview)
@@ -214,11 +212,6 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::CachePush => cache_push(ctx),
         Cmd::New { lang, dir } => new_project(ctx, &lang, &dir),
         Cmd::Password => password(ctx),
-        Cmd::Install => {
-            ctx.need(Host::Arc)?;
-            let f = flake(ctx, "install")?;
-            ctx.run(ctx.sudo("nix").args(["--extra-experimental-features", "nix-command flakes", "run", &f, "--", NIXOS_HOST]))
-        }
         Cmd::Iso => iso(ctx),
         Cmd::Preview { gpu, reset } => preview(ctx, gpu, reset),
         Cmd::Mac(m) => {
@@ -258,7 +251,8 @@ fn nh_os(ctx: &Ctx, action: &str) -> Result<()> {
         bail!("`vx {action}` is for the PC; on the Mac use vx switch or vx build");
     }
     let repo = ctx.repo()?.to_path_buf();
-    ctx.run(ctx.cmd("nh").args(["os", action]).arg(repo))
+    // -H: the hostname may differ from the configuration's name (the installer can rename the PC).
+    ctx.run(ctx.cmd("nh").args(["os", action]).arg(repo).args(["-H", NIXOS_HOST]))
 }
 
 /// darwin-rebuild, preferring the running system's own copy (sudo's PATH may lack it).
