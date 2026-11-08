@@ -361,6 +361,8 @@ pub struct Machine {
     /// Firmware in Setup Mode (no keys enrolled: lanzaboote can enroll ours).
     pub setup_mode: bool,
     pub tpm: bool,
+    /// Has a Wi-Fi card (the welcome screen offers to connect).
+    pub wifi: bool,
     /// Total RAM in GiB (swap size hint).
     pub ram_gb: u32,
     /// The graphics card found by lspci (a new host's default).

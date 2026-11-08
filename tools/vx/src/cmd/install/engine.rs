@@ -9,6 +9,7 @@
 //! - `settings` meta.nix / host.json / disks.json edits
 //! - `github`   logging in, the user's fork, their keys
 //! - `netbird`  logging in to NetBird on the installer
+//! - `wifi`     scanning for and connecting to Wi-Fi on the installer
 //! - `steps`    the install steps
 //! - `finish`   the summary's next steps
 
@@ -20,6 +21,7 @@ mod previous;
 mod runner;
 pub mod settings;
 mod steps;
+pub mod wifi;
 
 use super::plan::{Event, InstallData, Plan, Previous, Secret, StepState, Unlocked, WORK, WORK_REPO};
 use anyhow::{Context, Result, bail};
@@ -148,6 +150,19 @@ pub fn nb_start(host: &str, mode: Mode) -> (Result<netbird::Start>, Vec<String>)
 /// Wait for the NetBird login to finish; this peer's address. `cancel` stops waiting.
 pub fn nb_wait(cancel: &AtomicBool, mode: Mode) -> (Result<netbird::Status>, Vec<String>) {
     logged(mode, |r| netbird::wait(r, cancel))
+}
+
+/// The Wi-Fi networks around, strongest first.
+pub fn wifi_scan(mode: Mode) -> (Result<Vec<wifi::Network>>, Vec<String>) {
+    logged(mode, wifi::scan)
+}
+
+/// Connect to a Wi-Fi network and wait for the internet (up to 20 s): Ok(online).
+pub fn wifi_connect(n: &wifi::Network, password: Option<&Secret>, mode: Mode) -> (Result<bool>, Vec<String>) {
+    logged(mode, |r| {
+        wifi::connect(r, n, password)?;
+        Ok(wifi::wait_online(r, 20, super::probe::online))
+    })
 }
 
 /// Stop a waiting `netbird up` (leaving the screen, quitting).

@@ -7,9 +7,18 @@
 #     nix build .#nixosConfigurations.installer.config.system.build.isoImage
 #   Write it to a USB stick: `vx iso --flash /dev/sdX`.
 #
-# Boot it (UEFI). The installer opens on its own; plug in Ethernet first, or
-# quit it and run `nmtui` for Wi-Fi, then `vx-installer` to start it again.
-# Without working graphics it runs straight on the console instead.
+# Boot it (UEFI). The installer opens on its own. Network: Ethernet, or the
+# Wi-Fi baked in with `vx iso --wifi` (connects by itself on boot), or
+# "connect to wi-fi" on the installer's first screen. Whichever Wi-Fi it used
+# is copied into the new system. Without working graphics it runs straight on
+# the console instead.
+#
+# Wi-Fi on the stick: `vx iso --wifi [network]` writes a NetworkManager
+# keyfile to a temporary folder and builds with --impure and
+# VX_ISO_WIFI=<folder>; every *.nmconnection in it lands in
+# /etc/NetworkManager/system-connections (0600). The password is then in the
+# ISO and the building machine's store, never in git. A plain (pure) build has
+# no Wi-Fi in it.
 #
 # Secure Boot: when the firmware is in Setup Mode the installer enrolls the
 # keys itself (sbctl create-keys + enroll-keys). efivarfs is writable here:
@@ -28,6 +37,27 @@ let
   slate = (import ../../assets/themes/vainnor-slate.nix).scheme;
 
   # Every flake input's source, nested inputs too (deduplicated by store path).
+  # `vx iso --wifi`: NetworkManager keyfiles to bake in (impure builds only; "" otherwise).
+  wifiDir = builtins.getEnv "VX_ISO_WIFI";
+  wifiEtc =
+    lib:
+    lib.optionalAttrs (wifiDir != "") (
+      lib.mapAttrs'
+        (
+          n: _:
+          lib.nameValuePair "NetworkManager/system-connections/${n}" {
+            source = builtins.path {
+              path = /. + "${wifiDir}/${n}";
+              name = "wifi.nmconnection";
+            };
+            mode = "0600";
+          }
+        )
+        (
+          lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nmconnection" n) (builtins.readDir wifiDir)
+        )
+    );
+
   inputSources =
     let
       go = input: [ input.outPath ] ++ builtins.concatMap go (builtins.attrValues (input.inputs or { }));
@@ -40,6 +70,7 @@ in
   flake.nixosConfigurations.installer = inputs.nixpkgs.lib.nixosSystem {
     modules = [
       "${inputs.nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+      ({ lib, ... }: { environment.etc = wifiEtc lib; })
       (
         { pkgs, lib, ... }:
         let
@@ -174,7 +205,7 @@ in
               touch /tmp/.vx-installer-autostarted
               vx-installer-session
               echo
-              echo "installer closed. vx-installer starts it again; nmtui connects wi-fi."
+              echo "installer closed. vx-installer starts it again (it connects wi-fi too; or nmtui)."
               echo
             fi
           '';
@@ -184,7 +215,7 @@ in
 
             ===  arc installer  ===
             The installer starts by itself on tty1.
-            Wi-Fi: nmtui.  Start the installer again: vx-installer
+            Start the installer again: vx-installer (wi-fi is on its first screen)
           '';
         }
       )

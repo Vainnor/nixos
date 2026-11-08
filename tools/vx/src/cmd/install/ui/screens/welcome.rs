@@ -30,7 +30,12 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
     } else {
         mark(t, if real { 2 } else { 1 }, "not uefi: reboot the usb with its uefi: boot menu entry")
     });
-    r.push(if m.online { mark(t, 0, "online") } else { mark(t, 1, "offline: installs the repo copy on this usb") });
+    let wifi_on = app.wifi.connected.as_ref().map(|s| format!(" (wi-fi {s})")).unwrap_or_default();
+    r.push(if m.online { mark(t, 0, format!("online{wifi_on}")) } else { mark(t, 1, "offline: installs the repo copy on this usb") });
+    // Offline: connecting is the first thing to do. Online: it's out of the way, below.
+    if m.wifi && !app.offline && !m.online {
+        r.push(button_row(t, Field::WifiOpen, "connect to wi-fi"));
+    }
     r.push(if m.setup_mode {
         mark(t, 0, "secure boot in setup mode: the installer enrolls your keys")
     } else if m.secure_boot {
@@ -76,6 +81,9 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         "use the copy on this usb"
     };
     r.push(toggle_row(t, Field::FetchLatest, "repo", app.fetch_latest, lbl).disabled(app.offline || !m.online));
+    if m.wifi && !app.offline && m.online {
+        r.push(button_row(t, Field::WifiOpen, "wi-fi: change network"));
+    }
     r.push(Row::blank());
     r.push(button_row(t, Field::Start, "start").disabled(app.probe_error.is_some()));
     r

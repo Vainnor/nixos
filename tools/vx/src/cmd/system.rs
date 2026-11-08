@@ -109,6 +109,9 @@ pub enum Cmd {
         /// USB stick to write it to, e.g. /dev/sdb (erased; asks first)
         #[arg(long, value_name = "DEVICE")]
         flash: Option<String>,
+        /// Put a Wi-Fi network on the stick so it connects by itself: this PC's current one, or the one named
+        #[arg(long, value_name = "NETWORK", num_args = 0..=1, default_missing_value = "")]
+        wifi: Option<String>,
     },
     /// Boot this machine's config in a VM window (arc's off a NixOS host; login vainnor / preview)
     Preview {
@@ -216,7 +219,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::CachePush => cache_push(ctx),
         Cmd::New { lang, dir } => new_project(ctx, &lang, &dir),
         Cmd::Password => password(ctx),
-        Cmd::Iso { flash } => iso(ctx, flash.as_deref()),
+        Cmd::Iso { flash, wifi } => iso(ctx, flash.as_deref(), wifi.as_deref()),
         Cmd::Preview { gpu, reset } => preview(ctx, gpu, reset),
         Cmd::Mac(m) => {
             ctx.need(Host::Mac)?;
@@ -538,10 +541,24 @@ fn password(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
-fn iso(ctx: &Ctx, flash: Option<&str>) -> Result<()> {
+fn iso(ctx: &Ctx, flash: Option<&str>, wifi: Option<&str>) -> Result<()> {
     ctx.need(Host::NixOs)?;
     let f = flake(ctx, "nixosConfigurations.installer.config.system.build.isoImage")?;
-    ctx.run(ctx.nix().args(["build", &f]))?;
+    let mut build = ctx.nix();
+    build.args(["build", &f]);
+    // The Wi-Fi keyfile goes in through $VX_ISO_WIFI (modules/hosts/installer.nix), which needs --impure.
+    let dir = match wifi {
+        Some(name) => Some(iso_wifi(ctx, name)?),
+        None => None,
+    };
+    if let Some(d) = &dir {
+        build.arg("--impure").env("VX_ISO_WIFI", d);
+    }
+    let built = ctx.run(&mut build);
+    if let Some(d) = &dir {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    built?;
     let mut image = None;
     for e in std::fs::read_dir(ctx.repo.join("result/iso"))?.filter_map(|e| e.ok()) {
         let p = e.path();
@@ -557,6 +574,81 @@ fn iso(ctx: &Ctx, flash: Option<&str>) -> Result<()> {
     };
     let image = image.context("the build made no .iso")?;
     flash_usb(ctx, &image, dev)
+}
+
+/// A folder holding one NetworkManager keyfile for `name` (empty: the Wi-Fi this
+/// PC is on), for the ISO. A saved network's password comes from
+/// NetworkManager (sudo); any other network is asked for.
+fn iso_wifi(ctx: &Ctx, name: &str) -> Result<PathBuf> {
+    use crate::cmd::install::engine::wifi::{self, Security};
+    let saved: Vec<(String, String)> = ctx
+        .probe(Command::new("nmcli").args(["-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show"]))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| match wifi::split_terse(l).as_slice() {
+            [n, ty, active] if ty == "802-11-wireless" => Some((n.clone(), active.clone())),
+            _ => None,
+        })
+        .collect();
+    let name = if name.is_empty() {
+        match saved.iter().find(|(_, a)| a == "yes") {
+            Some((n, _)) => n.clone(),
+            None => bail!("this pc isn't on wi-fi: name the network, vx iso --wifi \"<network>\""),
+        }
+    } else {
+        name.to_string()
+    };
+    let (ssid, security, psk) = if saved.iter().any(|(n, _)| *n == name) {
+        let out = ctx.output(ctx.sudo("nmcli").args([
+            "-s",
+            "-t",
+            "-g",
+            "802-11-wireless.ssid,802-11-wireless-security.key-mgmt,802-11-wireless-security.psk",
+            "connection",
+            "show",
+            "id",
+            &name,
+        ]))?;
+        let f: Vec<String> = out.lines().map(|l| l.replace("\\:", ":").replace("\\\\", "\\")).collect();
+        let [ssid, mgmt, psk] = f.as_slice() else { bail!("couldn't read the saved network {name}") };
+        let sec = Security::from_key_mgmt(mgmt);
+        if sec == Security::Unsupported {
+            bail!("{name} uses a login (key-mgmt {mgmt}) the installer can't carry; connect on the stick with nmtui");
+        }
+        (ssid.clone(), sec, (!psk.is_empty()).then(|| psk.clone()))
+    } else {
+        ui::info(&format!("{name} isn't saved on this pc"));
+        let pw = util::prompt_hidden(&format!("password for {name} (empty for an open network): "))?;
+        if !pw.is_empty() && !(8..=63).contains(&pw.len()) {
+            bail!("a wi-fi password is 8 to 63 characters");
+        }
+        let sec = if pw.is_empty() { Security::Open } else { Security::Psk };
+        (name.clone(), sec, (!pw.is_empty()).then_some(pw))
+    };
+    // Saved without its password (kept in a desktop keyring instead): ask.
+    let psk = match psk {
+        None if security.needs_password() => {
+            let pw = util::prompt_hidden(&format!("password for {ssid}: "))?;
+            if !(8..=63).contains(&pw.len()) {
+                bail!("a wi-fi password is 8 to 63 characters");
+            }
+            Some(pw)
+        }
+        p => p,
+    };
+    let dir = std::env::temp_dir().join(format!("vx-iso-wifi-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    let file = dir.join(format!("{}.nmconnection", wifi::file_stem(&ssid)));
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&file)?;
+        f.write_all(wifi::keyfile(&ssid, security, psk.as_deref(), &wifi::new_uuid()).as_bytes())?;
+    }
+    ui::ok(&format!("the stick connects to {ssid} by itself"));
+    ui::warn("its wi-fi password is on the stick and in this pc's nix store: keep the stick to yourself");
+    Ok(dir)
 }
 
 /// Write the ISO to a USB stick, refusing anything that isn't a removable/USB whole disk.

@@ -4,6 +4,7 @@
 use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::engine::netbird::{self as nbe, Login as NbLoginInfo, Status as NbStatus};
 use super::super::engine::settings::host_name;
+use super::super::engine::wifi::Network;
 use super::super::plan::{
     Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, GitHubMode, GitHubPlan, Gpu, HomePlan, HostInfo, HostPlan, InstallData,
     Machine, NewHost, Outcome, Plan, Previous, Secret, Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO, with_requires,
@@ -40,6 +41,8 @@ pub enum Screen {
     Install,
     Summary,
     Failed,
+    /// Off the welcome screen: connect to Wi-Fi (not a step of its own).
+    Wifi,
 }
 
 pub const STEPS: [&str; 11] =
@@ -47,6 +50,9 @@ pub const STEPS: [&str; 11] =
 
 impl Screen {
     pub fn step(self) -> usize {
+        if self == Screen::Wifi {
+            return 0;
+        }
         (self as usize).min(10)
     }
     pub fn title(self) -> &'static str {
@@ -64,6 +70,7 @@ impl Screen {
             Screen::Install => "installing",
             Screen::Summary => "done",
             Screen::Failed => "install failed",
+            Screen::Wifi => "wi-fi",
         }
     }
 }
@@ -88,6 +95,14 @@ pub enum Use {
 pub enum Field {
     FetchLatest,
     Start,
+    /// Welcome: open the Wi-Fi screen.
+    WifiOpen,
+    /// A network from the scan (index into App::wifi.networks).
+    WifiNet(usize),
+    WifiPw,
+    WifiConnect,
+    WifiRescan,
+    WifiBack,
     GhLogin,
     GhCancel,
     GhSkip,
@@ -146,6 +161,7 @@ impl Field {
         matches!(
             self,
             Field::UnlockPassword
+                | Field::WifiPw
                 | Field::DataName(_)
                 | Field::DataMount(_)
                 | Field::HostName
@@ -222,6 +238,31 @@ pub enum TaskOut {
     Gh(GhOut, Vec<String>),
     /// NetBird login, with the commands it ran.
     Nb(NbOut, Vec<String>),
+    /// Wi-Fi scan / connect, with the commands it ran.
+    Wifi(WifiOut, Vec<String>),
+}
+
+pub enum WifiOut {
+    Scanned(Result<Vec<Network>, String>),
+    /// The network's name, and Ok(online).
+    Connected(String, Result<bool, String>),
+}
+
+/// The Wi-Fi screen.
+pub struct Wifi {
+    /// None: not scanned yet.
+    pub networks: Option<Vec<Network>>,
+    pub sel: Option<usize>,
+    pub pw: Input,
+    pub error: Option<String>,
+    /// Connected here, to this network.
+    pub connected: Option<String>,
+}
+
+impl Wifi {
+    pub fn selected(&self) -> Option<&Network> {
+        self.networks.as_ref()?.get(self.sel?)
+    }
 }
 
 pub enum NbOut {
@@ -382,6 +423,7 @@ pub struct App {
 
     pub gh: Gh,
     pub nb: Nb,
+    pub wifi: Wifi,
     pub full_name: Input,
     pub email: Input,
 
@@ -456,6 +498,7 @@ impl App {
             probe_error: None,
             pre_log: vec![],
             gh: Gh { phase: GhPhase::Start, error: None, unreachable: false, skipped: false, push: true, cancel: None, rx: None },
+            wifi: Wifi { networks: None, sel: None, pw: Input::secret(), error: None, connected: None },
             nb: Nb { phase: NbPhase::Start, error: None, skipped: false, host: String::new(), cancel: None, rx: None },
             full_name: Input::default(),
             email: Input::default(),
@@ -596,6 +639,10 @@ impl App {
                 self.pre_log.extend(logs);
                 self.apply_nb(out);
             }
+            TaskOut::Wifi(out, logs) => {
+                self.pre_log.extend(logs);
+                self.apply_wifi(out);
+            }
             TaskOut::Unlocked(Ok(u)) => {
                 self.carry = u.available.clone();
                 self.unlock_secret = u.previous.encrypted.then(|| Secret(self.unlock_pw.value.clone()));
@@ -728,6 +775,94 @@ impl App {
                 if e != "cancelled" {
                     self.nb.error = Some(e);
                 }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ wi-fi
+
+    /// Welcome's [ connect to wi-fi ]: the wi-fi screen, scanning.
+    pub fn wifi_open(&mut self) {
+        self.wifi.error = None;
+        self.go(Screen::Wifi);
+        self.wifi_scan();
+    }
+
+    pub fn wifi_scan(&mut self) {
+        let b = self.backend;
+        self.spawn("looking for wi-fi networks", move || {
+            let (r, logs) = b.wifi_scan();
+            TaskOut::Wifi(WifiOut::Scanned(r.map_err(|e| format!("{e:#}"))), logs)
+        });
+    }
+
+    /// Pick a network: the password field next (or connect, for an open one).
+    pub fn wifi_pick(&mut self, i: usize) {
+        if self.wifi.sel != Some(i) {
+            self.wifi.pw.clear();
+        }
+        self.wifi.sel = Some(i);
+        self.wifi.error = None;
+        match self.wifi.selected() {
+            Some(n) if n.security.needs_password() => self.focus = Some(Field::WifiPw),
+            Some(_) => self.wifi_connect(),
+            None => {}
+        }
+    }
+
+    pub fn wifi_connect(&mut self) {
+        let Some(n) = self.wifi.selected().cloned() else {
+            self.wifi.error = Some("pick a network first".into());
+            return;
+        };
+        if n.security.needs_password() && self.wifi.pw.value.is_empty() {
+            self.wifi.error = Some("enter the wi-fi password".into());
+            self.focus = Some(Field::WifiPw);
+            return;
+        }
+        let pw = n.security.needs_password().then(|| Secret(self.wifi.pw.value.clone()));
+        let b = self.backend;
+        self.spawn(&format!("connecting to {}", n.ssid), move || {
+            let (r, logs) = b.wifi_connect(&n, pw.as_ref());
+            TaskOut::Wifi(WifiOut::Connected(n.ssid.clone(), r.map_err(|e| format!("{e:#}"))), logs)
+        });
+    }
+
+    fn apply_wifi(&mut self, out: WifiOut) {
+        match out {
+            WifiOut::Scanned(Ok(n)) => {
+                // Keep the pick when it's still there.
+                let keep = self.wifi.selected().map(|x| x.ssid.clone());
+                self.wifi.sel = keep.and_then(|k| n.iter().position(|x| x.ssid == k));
+                self.wifi.networks = Some(n);
+                self.wifi.error = None;
+                self.fix_focus();
+            }
+            WifiOut::Scanned(Err(e)) => {
+                self.wifi.networks.get_or_insert_with(Vec::new);
+                self.wifi.error = Some(format!("couldn't scan: {e}"));
+            }
+            WifiOut::Connected(ssid, Ok(online)) => {
+                self.wifi.pw.clear();
+                self.wifi.error = None;
+                self.wifi.connected = Some(ssid.clone());
+                if let Some(m) = &mut self.machine {
+                    m.online = online;
+                }
+                if online && !self.offline {
+                    self.fetch_latest = true;
+                }
+                self.focus = Some(Field::WifiBack);
+                if online {
+                    self.say(Level::Ok, format!("connected to {ssid}"));
+                } else {
+                    self.say(Level::Warn, format!("connected to {ssid}, but the internet isn't reachable"));
+                }
+            }
+            WifiOut::Connected(_, Err(e)) => {
+                self.wifi.pw.clear();
+                self.wifi.error = Some(e);
+                self.focus = Some(if self.wifi.selected().is_some_and(|n| n.security.needs_password()) { Field::WifiPw } else { Field::WifiConnect });
             }
         }
     }
@@ -1156,6 +1291,9 @@ impl App {
     }
 
     pub fn back(&mut self) {
+        if self.screen == Screen::Wifi {
+            return self.go(Screen::Welcome);
+        }
         if self.screen == Screen::GitHub {
             self.gh_cancel();
         }
@@ -1647,6 +1785,7 @@ impl App {
                     // Enter in the last field of a group acts like the button below it.
                     match f {
                         Field::UnlockPassword => self.unlock(),
+                        Field::WifiPw => self.wifi_connect(),
                         Field::ConfirmYes => self.next(),
                         _ => self.move_focus(1),
                     }
@@ -1688,6 +1827,10 @@ impl App {
     fn edit(&mut self, f: Field, op: impl FnOnce(&mut String)) {
         let input = match f {
             Field::UnlockPassword => &mut self.unlock_pw,
+            Field::WifiPw => {
+                self.wifi.error = None;
+                &mut self.wifi.pw
+            }
             Field::DataName(i) => {
                 self.data_rows[i].name_edited = true;
                 &mut self.data_rows[i].name

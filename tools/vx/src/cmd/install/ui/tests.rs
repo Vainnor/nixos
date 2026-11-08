@@ -275,6 +275,8 @@ fn walk_the_screens_with_keys() {
     key(&mut a, KeyCode::Char(' '));
     assert!(!a.fetch_latest);
     key(&mut a, KeyCode::Down);
+    assert_eq!(a.focus, Some(Field::WifiOpen));
+    key(&mut a, KeyCode::Down);
     assert_eq!(a.focus, Some(Field::Start));
     // (tasks run on threads; apply their results directly)
     a.apply(TaskOut::Loaded(Ok(Box::new(demo::data()))));
@@ -588,6 +590,32 @@ fn render_every_screen() {
     a.machine.as_mut().unwrap().setup_mode = false;
     a.focus = Some(Field::RebootFirmware);
     dump("welcome-no-setup-mode", &mut a);
+
+    // Wi-Fi: offline welcome, the list with a password, connected.
+    let mut a = app();
+    a.machine.as_mut().unwrap().online = false;
+    a.fetch_latest = false;
+    a.focus = None;
+    dump("welcome-offline", &mut a);
+    assert_eq!(a.focus, Some(Field::WifiOpen));
+    a.go(Screen::Wifi);
+    dump("wifi-scanning", &mut a);
+    a.wifi.networks = Some(super::super::engine::wifi::parse_scan(
+        ":82:WPA2:home\n:61:WPA2 WPA3:home-5g\n:40::cafe guest\n:22:WPA2 802.1X:work\n",
+    ));
+    a.wifi_pick(0);
+    assert_eq!(a.focus, Some(Field::WifiPw));
+    a.wifi.pw.value = "hunter2hunter2".into();
+    a.wifi.error = Some("wrong password".into());
+    dump("wifi-pick", &mut a);
+    assert!(!render(&a, 120, 40).contains("hunter2"));
+    a.wifi.error = None;
+    a.wifi.connected = Some("home".into());
+    a.machine.as_mut().unwrap().online = true;
+    a.focus = None;
+    dump("wifi-connected", &mut a);
+    a.back();
+    assert_eq!(a.screen, Screen::Welcome);
 
     // NetBird: log in, the link and code, logged in.
     let mut a = unlocked();

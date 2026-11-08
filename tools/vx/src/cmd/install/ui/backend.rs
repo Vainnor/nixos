@@ -4,6 +4,7 @@
 
 use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::engine::netbird;
+use super::super::engine::wifi::Network;
 use super::super::engine::{self, Mode};
 use super::super::plan::{DiskInfo, Event, InstallData, Machine, Plan, Previous, Secret, Unlocked};
 use super::super::probe::{self, BackupTarget};
@@ -106,6 +107,22 @@ impl Backend {
 
     pub fn nb_stop(self) {
         engine::nb_stop();
+    }
+
+    // Wi-Fi: the demo and --dry-run pretend (a few fake networks, connects at once).
+
+    pub fn wifi_scan(self) -> (Result<Vec<Network>>, Vec<String>) {
+        if self.is_demo() {
+            demo::pause(900);
+        }
+        engine::wifi_scan(self.mode())
+    }
+
+    pub fn wifi_connect(self, n: &Network, password: Option<&Secret>) -> (Result<bool>, Vec<String>) {
+        if self.is_demo() {
+            demo::pause(1500);
+        }
+        engine::wifi_connect(n, password, self.mode())
     }
 
     pub fn unlock(self, prev: &Previous, password: Option<&Secret>) -> Result<Unlocked> {

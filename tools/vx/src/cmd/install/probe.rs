@@ -276,10 +276,16 @@ pub fn machine() -> Machine {
         secure_boot: efivar("SecureBoot"),
         setup_mode: efivar("SetupMode"),
         tpm: Path::new("/sys/class/tpm/tpm0").exists(),
+        wifi: has_wifi(),
         ram_gb: parse_meminfo_gb(&read("/proc/meminfo")),
         gpu: gpu(),
         online: online.join().unwrap_or(false),
     }
+}
+
+/// A wireless network interface (`/sys/class/net/<if>/wireless`).
+fn has_wifi() -> bool {
+    std::fs::read_dir("/sys/class/net").is_ok_and(|rd| rd.filter_map(|e| e.ok()).any(|e| e.path().join("wireless").exists()))
 }
 
 /// The graphics card, from `lspci -nn` (None when there's no lspci or no card).
@@ -336,7 +342,7 @@ pub fn parse_meminfo_gb(meminfo: &str) -> u32 {
 }
 
 /// Can we reach the binary cache? (DNS + TCP to cache.nixos.org:443, ~3 s at most.)
-fn online() -> bool {
+pub fn online() -> bool {
     use std::net::{TcpStream, ToSocketAddrs};
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

@@ -18,7 +18,7 @@ pub fn pause(ms: u64) {
 }
 
 pub fn machine() -> Machine {
-    Machine { root: true, uefi: true, online: true, secure_boot: false, setup_mode: true, tpm: true, ram_gb: 64, gpu: Gpu::Amd }
+    Machine { root: true, uefi: true, online: true, secure_boot: false, setup_mode: true, tpm: true, wifi: true, ram_gb: 64, gpu: Gpu::Amd }
 }
 
 fn part(path: &str, fstype: Option<&str>, size: u64, label: Option<&str>, partlabel: Option<&str>, uuid: Option<&str>) -> PartInfo {

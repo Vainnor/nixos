@@ -9,6 +9,7 @@ mod previous;
 mod progress;
 mod review;
 mod welcome;
+mod wifi;
 
 use super::app::{Act, App, Field, Screen};
 use super::form::{self, Row};
@@ -34,6 +35,7 @@ pub fn rows(app: &App, width: u16) -> Vec<Row> {
         Screen::Install => vec![],
         Screen::Summary => progress::summary_rows(app, w),
         Screen::Failed => progress::failed_rows(app, w),
+        Screen::Wifi => wifi::rows(app, w),
     }
 }
 
@@ -47,6 +49,7 @@ pub fn draw_body(f: &mut Frame, area: Rect, app: &App) {
 pub fn act(app: &mut App, f: Field, a: Act) {
     match f {
         Field::FetchLatest | Field::Start => welcome::act(app, f, a),
+        Field::WifiOpen | Field::WifiNet(_) | Field::WifiConnect | Field::WifiRescan | Field::WifiBack => wifi::act(app, f, a),
         Field::GhLogin | Field::GhCancel | Field::GhSkip | Field::GhPush | Field::GhFork | Field::GhQuit => github::act(app, f, a),
         Field::NbLogin | Field::NbCancel | Field::NbSkip => netbird::act(app, f, a),
         Field::RebootFirmware if app.screen == Screen::Welcome => welcome::act(app, f, a),

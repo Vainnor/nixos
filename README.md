@@ -98,15 +98,19 @@ Versions are the ones pinned in `flake.lock` today; `vx update` moves them.
 
 **1. Get the installer onto a USB stick.** Build the custom ISO with `vx iso` (x86_64 Linux; WSL works),
 or `nix build .#nixosConfigurations.installer.config.system.build.isoImage`. Write it to a stick with
-`vx iso --flash /dev/sdX` (or any image writer). Any other NixOS ISO works too, see the end of this section.
+`vx iso --flash /dev/sdX` (or any image writer). Add `--wifi` to put the Wi-Fi this PC is on onto the
+stick (or `--wifi "<network>"`; it asks for the password when the network isn't saved here), so the stick
+connects by itself when it boots. The password is then on the stick and in the building PC's Nix store, never
+in git. Any other NixOS ISO works too, see the end of this section.
 
 **2. BIOS.** Boot in UEFI mode. Turn Secure Boot **off**, only so the installer USB boots, and put it into
 **Setup Mode**: *Security > Secure Boot*, mode **Custom**, **delete all keys**. The installer then enrolls
 your own keys itself (see Secure Boot + TPM below). In Windows, turn off Fast Startup first.
 
-**3. Boot the stick.** The installer starts by itself, full screen. Plug in Ethernet before it starts; for
-Wi-Fi, quit it, run `nmtui`, then `vx-installer` to start it again. If the graphics don't come up it runs on
-the plain console instead. Nothing is erased until the review screen.
+**3. Boot the stick.** The installer starts by itself, full screen. Network: Ethernet, the Wi-Fi from
+`vx iso --wifi`, or **connect to wi-fi** on its first screen (pick the network, type the password). The
+Wi-Fi it used is copied into the new system, so it's online on the first boot too. If the graphics don't
+come up it runs on the plain console instead. Nothing is erased until the review screen.
 
 The screens:
 - **welcome**: checks root, UEFI, network, Secure Boot / Setup Mode and the TPM, and offers to fetch the

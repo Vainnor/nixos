@@ -8,7 +8,7 @@ use super::super::plan::{
 use super::disk::{self, find_part};
 use super::finish::{self, NextInput, PushState};
 use super::runner::{Cmd, Runner, shell_quote};
-use super::{github, netbird, previous, settings};
+use super::{github, netbird, previous, settings, wifi};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
@@ -497,6 +497,22 @@ impl<'a> Run<'a> {
             self.r.run(
                 Cmd::new("rsync").args(["-aHAX", &format!("{}/", carry_dir().display()), &format!("{}/", pers.display())]),
             )?;
+        }
+
+        // The Wi-Fi this usb is on (connected in the installer, or baked into
+        // the stick by `vx iso --wifi`): the new system joins it from its first
+        // boot. A carried-over file of the same name wins.
+        let wifi_files = if self.r.dry() { vec![] } else { wifi::saved_keyfiles() };
+        if !wifi_files.is_empty() {
+            let dir = pers.join(wifi::CONNECTIONS.trim_start_matches('/'));
+            self.r.mkdir(&dir, 0o700)?;
+            for f in wifi_files {
+                let Some(name) = f.file_name() else { continue };
+                let to = dir.join(name);
+                if !self.r.exists(&to, false) {
+                    self.r.copy_file(&f, &to, 0o600)?;
+                }
+            }
         }
 
         // Login password.
