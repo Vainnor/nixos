@@ -16,6 +16,27 @@ pub fn hostname(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Your name for commits and meta.nix (a fork's install).
+pub fn full_name(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() || s.chars().count() > 80 {
+        return Err("name: 1 to 80 characters".into());
+    }
+    if s.chars().any(|c| c.is_control() || c == '"' || c == '\\' || c == '$') {
+        return Err("name: no quotes, \\ or $".into());
+    }
+    Ok(())
+}
+
+/// An email for commits and meta.nix.
+pub fn email(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    let ok = s.len() <= 120
+        && s.split_once('@').is_some_and(|(a, b)| !a.is_empty() && b.contains('.') && !b.starts_with('.') && !b.ends_with('.'))
+        && !s.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\\' | '$' | '<' | '>'));
+    if ok { Ok(()) } else { Err("email: like you@example.com".into()) }
+}
+
 const RESERVED_USERS: [&str; 12] =
     ["root", "nobody", "nixbld", "daemon", "bin", "sys", "messagebus", "sshd", "systemd-network", "users", "wheel", "admin"];
 
@@ -114,6 +135,17 @@ mod tests {
         assert!(hostname("arc-2").is_ok());
         for bad in ["", "Arc", "-arc", "arc-", "a.b", "a b", &"a".repeat(64)] {
             assert!(hostname(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn names_and_emails() {
+        assert!(full_name("Some One").is_ok());
+        assert!(full_name("").is_err() && full_name("a\"b").is_err() && full_name("${x}").is_err());
+        assert!(email("someone@example.com").is_ok());
+        assert!(email("1+x@users.noreply.github.com").is_ok());
+        for bad in ["", "x", "a@b", "a b@c.d", "a@.com", "\"a\"@b.c"] {
+            assert!(email(bad).is_err(), "{bad}");
         }
     }
 

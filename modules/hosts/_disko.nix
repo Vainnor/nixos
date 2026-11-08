@@ -1,9 +1,10 @@
-# arc's drives, from ./disks.json. The installer (`vx install`) writes that
-# file with the drives you picked, then runs disko on this layout; commit and
-# push it afterwards so rebuilds keep mounting the same drives. Without the
-# file this is today's layout: one encrypted system disk, no swap file, no
-# data drives (the device is a placeholder; the installed system mounts by
-# partition label, so the disk id only matters while installing).
+# Every host's drives, from its own modules/hosts/<name>/disks.json
+# (flake/hosts.nix passes the path). The installer (`vx install`) writes that
+# file with the drives you picked, then runs disko on this layout; it is
+# committed (and pushed) so rebuilds keep mounting the same drives. Without
+# the file this is the default layout: one encrypted system disk, no swap
+# file, no data drives (the device is a placeholder; the installed system
+# mounts by partition label, so the disk id only matters while installing).
 #
 # disks.json (the shape is DisksJson in tools/vx/src/cmd/install/plan.rs):
 #   { "system": { "device": "/dev/disk/by-id/...", "encrypt": true, "tpm": true, "swap_gb": 16 },
@@ -29,7 +30,11 @@
 #           (not in the initrd) with /persistent/etc/keys/<name>.key.
 #   mount   kept as it is and mounted by UUID (e.g. a Windows drive via ntfs3).
 # Every data drive is `nofail`: a missing one never stops the boot.
-{ inputs, user }:
+{
+  inputs,
+  user,
+  disksFile,
+}:
 {
   config,
   lib,
@@ -38,7 +43,6 @@
   ...
 }:
 let
-  disksFile = ./disks.json;
   disks =
     if builtins.pathExists disksFile then
       lib.importJSON disksFile

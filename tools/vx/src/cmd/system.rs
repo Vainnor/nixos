@@ -1,4 +1,4 @@
-//! Rebuilding, updating and checking the system, on the PC (nh) and the Mac
+//! Rebuilding, updating and checking the system, on the NixOS machines (nh) and the Mac
 //! (darwin-rebuild), plus `vx @arc ...` / `vx @mac ...` over SSH.
 
 mod doctor;
@@ -6,7 +6,7 @@ mod mac;
 mod status;
 mod util;
 
-use crate::ctx::{self, ARC_SSH, Ctx, Host, MAC_HOST, MAC_SSH, NIXOS_HOST};
+use crate::ctx::{self, ARC_SSH, Ctx, Host, MAC_HOST, MAC_SSH};
 use crate::ui;
 use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
@@ -110,7 +110,7 @@ pub enum Cmd {
         #[arg(long, value_name = "DEVICE")]
         flash: Option<String>,
     },
-    /// Boot arc's config in a VM window (any Linux with Nix; login vainnor / preview)
+    /// Boot this machine's config in a VM window (arc's off a NixOS host; login vainnor / preview)
     Preview {
         /// Graphics: soft (no GL, for WSL), gl, or auto
         #[arg(long, value_enum, default_value_t = Gpu::Auto)]
@@ -164,13 +164,13 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::Test => nh_os(ctx, "test"),
         Cmd::Boot => nh_os(ctx, "boot"),
         Cmd::Build => match ctx.host {
-            Host::Arc => nh_os(ctx, "build"),
+            Host::NixOs => nh_os(ctx, "build"),
             Host::Mac => build_and_diff(ctx),
         },
         Cmd::Update { inputs, yes } => update(ctx, &inputs, yes),
         Cmd::Upgrade { inputs } => update(ctx, &inputs, true),
         Cmd::Rollback => match ctx.host {
-            Host::Arc => ctx.run(ctx.sudo("nixos-rebuild").args(["switch", "--rollback"])),
+            Host::NixOs => ctx.run(ctx.sudo("nixos-rebuild").args(["switch", "--rollback"])),
             Host::Mac => ctx.run(ctx.sudo(&darwin_rebuild(ctx)?).args(["switch", "--rollback"])),
         },
         Cmd::Clean { yes } => {
@@ -208,7 +208,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         }
         Cmd::Repl => {
             let attr = match ctx.host {
-                Host::Arc => format!("nixosConfigurations.{NIXOS_HOST}"),
+                Host::NixOs => format!("nixosConfigurations.{}", ctx.nixos_host()),
                 Host::Mac => format!("darwinConfigurations.{MAC_HOST}"),
             };
             ctx.run(ctx.nix().arg("repl").arg(flake(ctx, &attr)?))
@@ -244,19 +244,19 @@ fn flake(ctx: &Ctx, attr: &str) -> Result<String> {
 /// This machine's system derivation in the flake.
 fn system_attr(ctx: &Ctx) -> String {
     match ctx.host {
-        Host::Arc => format!("nixosConfigurations.{NIXOS_HOST}.config.system.build.toplevel"),
+        Host::NixOs => format!("nixosConfigurations.{}.config.system.build.toplevel", ctx.nixos_host()),
         Host::Mac => format!("darwinConfigurations.{MAC_HOST}.system"),
     }
 }
 
-/// `nh os <action> <repo>` on the PC.
+/// `nh os <action> <repo>` on a NixOS machine.
 fn nh_os(ctx: &Ctx, action: &str) -> Result<()> {
     if ctx.host == Host::Mac {
-        bail!("`vx {action}` is for the PC; on the Mac use vx switch or vx build");
+        bail!("`vx {action}` is for the NixOS machines; on the Mac use vx switch or vx build");
     }
     let repo = ctx.repo()?.to_path_buf();
-    // -H: the hostname may differ from the configuration's name (the installer can rename the PC).
-    ctx.run(ctx.cmd("nh").args(["os", action]).arg(repo).args(["-H", NIXOS_HOST]))
+    // -H: the hostname may differ from the configuration's name (each host is its own nixosConfiguration).
+    ctx.run(ctx.cmd("nh").args(["os", action]).arg(repo).args(["-H", ctx.nixos_host()]))
 }
 
 /// darwin-rebuild, preferring the running system's own copy (sudo's PATH may lack it).
@@ -277,7 +277,7 @@ fn darwin_rebuild(ctx: &Ctx) -> Result<String> {
 /// Build and switch this machine.
 fn switch(ctx: &Ctx) -> Result<()> {
     match ctx.host {
-        Host::Arc => nh_os(ctx, "switch"),
+        Host::NixOs => nh_os(ctx, "switch"),
         Host::Mac => {
             let f = flake(ctx, MAC_HOST)?;
             let dr = darwin_rebuild(ctx)?;
@@ -452,7 +452,7 @@ fn sync(ctx: &Ctx, message: &str, yes: bool) -> Result<()> {
     ui::heading("switch");
     switch(ctx)?;
     let other = match ctx.host {
-        Host::Arc => "mac",
+        Host::NixOs => "mac",
         Host::Mac => "arc",
     };
     if yes || ui::confirm(&format!("pull and switch {other} too?")) {
@@ -462,8 +462,8 @@ fn sync(ctx: &Ctx, message: &str, yes: bool) -> Result<()> {
 }
 
 fn deploy(ctx: &Ctx, boot: bool) -> Result<()> {
-    if ctx.is_arc() {
-        bail!("you're on the PC: vx switch (vx sync also pushes)");
+    if ctx.is_nixos() {
+        bail!("you're on a NixOS machine: vx switch (vx sync also pushes)");
     }
     push(ctx)?;
     let action = if boot { "boot" } else { "switch" };
@@ -473,7 +473,7 @@ fn deploy(ctx: &Ctx, boot: bool) -> Result<()> {
 }
 
 fn cache_push(ctx: &Ctx) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let meta = util::meta_src(ctx.repo()?);
     let Some((_, cache)) = util::binary_cache(&meta) else {
         bail!("the homelab cache is off (meta.binaryCache = null in modules/flake/meta.nix)");
@@ -516,7 +516,7 @@ fn new_project(ctx: &Ctx, lang: &str, dir: &Path) -> Result<()> {
 }
 
 fn password(ctx: &Ctx) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let a = util::prompt_hidden("New password: ")?;
     let b = util::prompt_hidden("Repeat:       ")?;
     if a.is_empty() || a != b {
@@ -532,7 +532,7 @@ fn password(ctx: &Ctx) -> Result<()> {
 }
 
 fn iso(ctx: &Ctx, flash: Option<&str>) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let f = flake(ctx, "nixosConfigurations.installer.config.system.build.isoImage")?;
     ctx.run(ctx.nix().args(["build", &f]))?;
     let mut image = None;
@@ -609,7 +609,7 @@ fn flash_target_ok(info: &str) -> (bool, &'static str) {
 }
 
 fn preview(ctx: &Ctx, gpu: Gpu, reset: bool) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let home = PathBuf::from(std::env::var("HOME")?);
     let cache = home.join(".cache/arc-preview");
     let disk = cache.join("arc.qcow2");
@@ -621,7 +621,7 @@ fn preview(ctx: &Ctx, gpu: Gpu, reset: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let f = flake(ctx, &format!("nixosConfigurations.{NIXOS_HOST}.config.system.build.vm"))?;
+    let f = flake(ctx, &format!("nixosConfigurations.{}.config.system.build.vm", ctx.nixos_host()))?;
     ctx.run(ctx.nix().args(["build", &f, "-o", "/tmp/arc-preview"]))?;
     std::fs::create_dir_all(&cache)?;
     let wsl = std::fs::read_to_string("/proc/version").map(|v| v.to_lowercase().contains("microsoft")).unwrap_or(false);
@@ -634,19 +634,37 @@ fn preview(ctx: &Ctx, gpu: Gpu, reset: bool) -> Result<()> {
     if !Path::new("/dev/kvm").exists() {
         ui::warn("no /dev/kvm here: it will run, but slowly");
     }
-    let mut c = Command::new(format!("/tmp/arc-preview/bin/run-{NIXOS_HOST}-vm"));
+    let mut c = Command::new(format!("/tmp/arc-preview/bin/run-{}-vm", ctx.nixos_host()));
     c.env("NIX_DISK_IMAGE", &disk).env("QEMU_OPTS", format!("-vga none -device {dev} -display {disp}"));
     ctx.run(&mut c)
 }
 
-/// The SSH destination for a machine; VX_ARC_SSH / VX_MAC_SSH override.
+/// The SSH destination for a machine: arc and the Mac have fixed NetBird
+/// names, any other host is `<user>@<name>.netbird.cloud`. VX_<NAME>_SSH overrides.
 fn ssh_target(target: &str) -> Result<String> {
-    let (var, default) = match target {
-        "arc" | "pc" => ("VX_ARC_SSH", ARC_SSH),
-        "mac" => ("VX_MAC_SSH", MAC_SSH),
-        other => bail!("unknown machine @{other}: use @arc or @mac"),
-    };
-    Ok(std::env::var(var).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| default.to_string()))
+    let target = if target == "pc" { "arc" } else { target };
+    let valid = !target.is_empty()
+        && target.len() <= 31
+        && target.starts_with(|c: char| c.is_ascii_lowercase())
+        && target.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !valid {
+        bail!("unknown machine @{target}: use @arc, @mac or a host name from modules/hosts");
+    }
+    let var = format!("VX_{}_SSH", target.to_uppercase().replace('-', "_"));
+    if let Some(v) = std::env::var(&var).ok().filter(|s| !s.is_empty()) {
+        return Ok(v);
+    }
+    let user = std::env::var("USER").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "vainnor".into());
+    Ok(default_ssh(target, &user))
+}
+
+/// `vx @<name>`'s destination without overrides.
+pub fn default_ssh(target: &str, user: &str) -> String {
+    match target {
+        "arc" => ARC_SSH.to_string(),
+        "mac" => MAC_SSH.to_string(),
+        other => format!("{user}@{other}.netbird.cloud"),
+    }
 }
 
 /// The command line run on the other machine. vx is called by its
@@ -663,9 +681,9 @@ pub fn remote_command(user: &str, bin: Option<&str>, args: &[String]) -> String 
     format!("test -x {hm} && exec {hm}{rest} || exec vx{rest}")
 }
 
-/// `vx @arc ...`: run vx on another machine.
+/// `vx @arc ...` / `vx @<host> ...`: run vx on another machine.
 pub fn remote(target: &str, args: &[String]) -> Result<()> {
-    let here = if cfg!(target_os = "macos") { "mac" } else { "arc" };
+    let here = if cfg!(target_os = "macos") { "mac".to_string() } else { ctx::nixos_host() };
     let target = if target == "pc" { "arc" } else { target };
     if target == here {
         // Already here: just run it.
@@ -705,6 +723,13 @@ mod tests {
 
     #[test]
     fn remote_cmd() {
+        assert_eq!(default_ssh("arc", "x"), ARC_SSH);
+        assert_eq!(default_ssh("mac", "x"), MAC_SSH);
+        assert_eq!(default_ssh("forge", "someone"), "someone@forge.netbird.cloud");
+        assert!(ssh_target("Bad!").is_err());
+        assert_eq!(ctx::host_from(Some("forge\n")), "forge");
+        assert_eq!(ctx::host_from(Some("NixOS box")), "arc");
+        assert_eq!(ctx::host_from(None), "arc");
         let c = remote_command("vainnor", None, &["commit".into(), "fix: it's done".into()]);
         assert_eq!(
             c,

@@ -1,8 +1,9 @@
 # OBS, pre-configured for the Vainnor overlay pack (assets/overlays).
 #
 # What you get on first launch:
-#   - Profile "Vainnor": 1920x1080 @ 60, Advanced output, AMD hardware encoding
-#     (H.264 VA-API CBR 6000 to Twitch, HEVC CQP for recordings), Hybrid MP4,
+#   - Profile "Vainnor": 1920x1080 @ 60, Advanced output, hardware encoding on
+#     the host's GPU (H.264 CBR 6000 to Twitch, HEVC CQP for recordings; VA-API
+#     on AMD/Intel, NVENC on NVIDIA, x264 without a GPU), Hybrid MP4,
 #     stream on Track 1, Twitch VOD on Track 2, record Tracks 1-4.
 #   - Scene collections "Vainnor Mono", "Vainnor Horror", "Vainnor Purple":
 #     the eight overlay scenes per theme, already layered (game, webcam, page,
@@ -79,12 +80,39 @@ in
   flake.modules.homeManager.streaming =
     {
       config,
+      osConfig,
       pkgs,
       lib,
       ...
     }:
     let
       json = pkgs.formats.json { };
+
+      # Hardware encoders for the host's GPU (host.json `gpu`): VA-API on AMD and
+      # Intel, NVENC on NVIDIA, x264 on the CPU without a GPU.
+      enc =
+        {
+          nvidia = {
+            stream = "obs_nvenc_h264_tex";
+            record = "obs_nvenc_hevc_tex";
+            cqp = {
+              cqp = 20;
+            };
+          };
+          none = {
+            stream = "obs_x264";
+            record = "obs_x264";
+            cqp = {
+              rate_control = "CRF";
+              crf = 20;
+            };
+          };
+        }
+        .${osConfig.vx.host.gpu} or {
+          stream = "ffmpeg_vaapi_tex";
+          record = "hevc_ffmpeg_vaapi_tex";
+          cqp = { };
+        };
       ini = pkgs.formats.ini { };
 
       themes = {
@@ -379,14 +407,14 @@ in
           };
           Output.Mode = "Advanced";
           AdvOut = {
-            Encoder = "ffmpeg_vaapi_tex";
+            Encoder = enc.stream;
             TrackIndex = 1;
             VodTrackEnabled = true;
             VodTrackIndex = 2;
             RecType = "Standard";
             RecFilePath = "${home}/Videos/OBS";
             RecFormat2 = "hybrid_mp4";
-            RecEncoder = "hevc_ffmpeg_vaapi_tex";
+            RecEncoder = enc.record;
             RecTracks = tracks [
               1
               2
@@ -409,11 +437,14 @@ in
           keyint_sec = 2;
           bf = 2;
         };
-        "basic/profiles/Vainnor/recordEncoder.json" = json.generate "recordEncoder.json" {
-          rate_control = "CQP";
-          qp = 20;
-          keyint_sec = 2;
-        };
+        "basic/profiles/Vainnor/recordEncoder.json" = json.generate "recordEncoder.json" (
+          {
+            rate_control = "CQP";
+            qp = 20;
+            keyint_sec = 2;
+          }
+          // enc.cqp
+        );
         "user.ini" = ini.generate "user.ini" {
           General.FirstRun = true; # skip the auto-configuration wizard
           Appearance.Theme = obsThemeId;

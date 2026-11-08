@@ -1,0 +1,10 @@
+{
+  "name": "arc",
+  "system": "x86_64-linux",
+  "stateVersion": "26.11",
+  "aspects": ["base", "desktop", "gaming", "dev", "privacy", "streaming", "vm"],
+  "gpu": "amd",
+  "primaryMonitor": "VG34VQL3A",
+  "audioOutput": null,
+  "replayMonitor": "screen"
+}

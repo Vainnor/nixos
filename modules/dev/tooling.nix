@@ -4,6 +4,7 @@
 #
 # Commits are signed with your SSH key from 1Password (meta.signingKey); GitHub
 # shows them as Verified once the key is added there as a *signing* key.
+# signingKey = null turns signing off.
 { config, ... }:
 let
   inherit (config) meta;
@@ -39,11 +40,13 @@ in
     { pkgs, lib, ... }:
     let
       inherit (pkgs.stdenv.hostPlatform) isLinux;
+      # signingKey = null: plain, unsigned commits (no signer, no allowed_signers).
+      signed = meta.signingKey or null != null;
     in
     {
       programs.git = {
         enable = true;
-        signing = {
+        signing = lib.mkIf signed {
           format = "ssh";
           key = meta.signingKey;
           signByDefault = true;
@@ -52,7 +55,7 @@ in
           signer = lib.mkIf isLinux "${pkgs._1password-gui}/bin/op-ssh-sign";
         };
         settings = {
-          gpg.ssh.allowedSignersFile = "~/.config/git/allowed_signers";
+          gpg = lib.mkIf signed { ssh.allowedSignersFile = "~/.config/git/allowed_signers"; };
           user.name = meta.username;
           user.email = meta.email;
           init.defaultBranch = "main";
@@ -60,7 +63,9 @@ in
           push.autoSetupRemote = true;
         };
       };
-      xdg.configFile."git/allowed_signers".text = "${meta.email} ${meta.signingKey}\n";
+      xdg.configFile."git/allowed_signers" = lib.mkIf signed {
+        text = "${meta.email} ${meta.signingKey}\n";
+      };
 
       programs.gh.enable = true;
       programs.k9s.enable = true; # Kubernetes TUI, themed by Stylix

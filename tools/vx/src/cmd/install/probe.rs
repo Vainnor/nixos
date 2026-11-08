@@ -6,7 +6,7 @@
 //! /dev/disk/by-id and run lsblk. It compiles anywhere; off Linux the
 //! wrappers simply find nothing.
 
-use super::plan::{DataMode, DiskInfo, DiskKind, Machine, PartInfo, Plan, Previous};
+use super::plan::{DataMode, DiskInfo, DiskKind, Gpu, Machine, PartInfo, Plan, Previous};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -277,8 +277,46 @@ pub fn machine() -> Machine {
         setup_mode: efivar("SetupMode"),
         tpm: Path::new("/sys/class/tpm/tpm0").exists(),
         ram_gb: parse_meminfo_gb(&read("/proc/meminfo")),
+        gpu: gpu(),
         online: online.join().unwrap_or(false),
     }
+}
+
+/// The graphics card, from `lspci -nn` (None when there's no lspci or no card).
+pub fn gpu() -> Gpu {
+    Command::new("lspci")
+        .arg("-nn")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| parse_lspci_gpu(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+/// The GPU vendor from `lspci -nn` lines: VGA / 3D / display controllers by
+/// PCI vendor id (1002 amd, 10de nvidia, 8086 intel). With more than one
+/// (an iGPU and a card), the card wins: nvidia, then amd, then intel.
+pub fn parse_lspci_gpu(out: &str) -> Gpu {
+    let mut found = vec![];
+    for l in out.lines() {
+        let class = l.contains("VGA compatible controller") || l.contains("3D controller") || l.contains("Display controller");
+        if !class {
+            continue;
+        }
+        // The last [vvvv:dddd] on the line is the vendor:device id.
+        let id = l.rmatch_indices('[').find_map(|(i, _)| {
+            let rest = &l[i + 1..];
+            let id = &rest[..rest.find(']')?];
+            (id.len() == 9 && id.as_bytes()[4] == b':').then_some(id)
+        });
+        match id.map(|i| &i[..4]) {
+            Some("10de") => found.push(Gpu::Nvidia),
+            Some("1002") => found.push(Gpu::Amd),
+            Some("8086") => found.push(Gpu::Intel),
+            _ => {}
+        }
+    }
+    [Gpu::Nvidia, Gpu::Amd, Gpu::Intel].into_iter().find(|g| found.contains(g)).unwrap_or(Gpu::None)
 }
 
 /// The real uid from /proc/self/status (`Uid:\t0\t0\t0\t0`).
@@ -416,6 +454,21 @@ fn probe_free(part: &str, fstype: &str) -> Option<u64> {
 pub(crate) mod tests {
     use super::*;
 
+    #[test]
+    fn gpus_from_lspci() {
+        let arc = "00:00.0 Host bridge [0600]: Advanced Micro Devices, Inc. [AMD] Device [1022:14d8]
+03:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX] [1002:744c] (rev c8)
+03:00.1 Audio device [0403]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 HDMI/DP Audio [1002:ab30]
+7c:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon Graphics] [1002:13c0] (rev c5)";
+        assert_eq!(parse_lspci_gpu(arc), Gpu::Amd);
+        let laptop = "00:02.0 VGA compatible controller [0300]: Intel Corporation Alder Lake-P GT2 [Iris Xe Graphics] [8086:46a6] (rev 0c)
+01:00.0 3D controller [0302]: NVIDIA Corporation GA107M [GeForce RTX 3050 Mobile] [10de:25a2] (rev a1)";
+        assert_eq!(parse_lspci_gpu(laptop), Gpu::Nvidia);
+        assert_eq!(parse_lspci_gpu("00:02.0 VGA compatible controller [0300]: Intel Corporation UHD Graphics 630 [8086:3e92]"), Gpu::Intel);
+        assert_eq!(parse_lspci_gpu("00:01.0 VGA compatible controller [0300]: Red Hat, Inc. Virtio GPU [1af4:1050] (rev 01)"), Gpu::None);
+        assert_eq!(parse_lspci_gpu(""), Gpu::None);
+    }
+
     /// `lsblk -J -b -o ...` on the real PC (serials and UUIDs made up), booted
     /// from the installer USB with the old NixOS disk still locked.
     pub const FIXTURE: &str = r#"{
@@ -540,7 +593,8 @@ pub(crate) mod tests {
         let d = fixture_disks();
         let plan = |device: &str, data: Vec<DataDisk>| Plan {
             flake: "/tmp/x".into(),
-            host: "arc".into(),
+            host: super::super::plan::HostPlan::Existing("arc".into()),
+            github: super::super::plan::GitHubPlan::offline("vainnor/nixos"),
             system: SystemDisk { device: device.into(), encrypt: true, tpm: false, swap_gb: 0 },
             data,
             settings: Settings {

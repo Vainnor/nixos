@@ -6,22 +6,25 @@
 //! - `runner`   runs commands and writes files, honouring [`Mode`]
 //! - `disk`     lsblk, mounts, the safety checks
 //! - `previous` unlocking a previous install read-only, what it can carry
-//! - `settings` meta.nix / host file / disks.json edits
+//! - `settings` meta.nix / host.json / disks.json edits
+//! - `github`   logging in, the user's fork, their keys
 //! - `steps`    the install steps
 //! - `finish`   the summary's next steps
 
 mod disk;
 mod finish;
+pub mod github;
 mod previous;
 mod runner;
-mod settings;
+pub mod settings;
 mod steps;
 
 use super::plan::{Event, InstallData, Plan, Previous, Secret, StepState, Unlocked, WORK, WORK_REPO};
 use anyhow::{Context, Result, bail};
 use runner::{Cmd, Runner};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{self, Sender};
 
 /// How commands are executed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,30 +55,50 @@ pub fn load_data(path: Option<&Path>, repo: Option<&Path>) -> Result<InstallData
     serde_json::from_str(&text).with_context(|| format!("{} is not valid install data", file.display()))
 }
 
-/// Make WORK_REPO: a fresh `git clone` of data.repo_url when `update` (and
-/// online), otherwise a writable copy of data.flake. Returns the path.
-pub fn prepare_repo(data: &InstallData, update: bool, mode: Mode) -> Result<PathBuf> {
-    let r = Runner::new(mode, None);
+/// Run `f` with a Runner whose log lines are collected and returned with its result.
+fn logged<T>(mode: Mode, f: impl FnOnce(&Runner) -> Result<T>) -> (Result<T>, Vec<String>) {
+    let (tx, rx) = mpsc::channel();
+    let r = Runner::new(mode, Some(tx));
+    let res = f(&r);
+    drop(r);
+    let logs = rx.try_iter().filter_map(|e| if let Event::Log(l) = e { Some(l) } else { None }).collect();
+    (res, logs)
+}
+
+/// Make WORK_REPO: a fresh `git clone` of `origin` (the upstream repo, or the
+/// user's fork; through gh's login) when `update`, otherwise a writable copy
+/// of data.flake. A fork also gets `upstream` = data.repo_url. Returns the
+/// path, and the commands it ran.
+pub fn prepare_repo(data: &InstallData, update: bool, origin: &str, mode: Mode) -> (Result<PathBuf>, Vec<String>) {
+    logged(mode, |r| prepare_repo_with(r, data, update, origin))
+}
+
+fn prepare_repo_with(r: &Runner, data: &InstallData, update: bool, origin: &str) -> Result<PathBuf> {
     let repo = Path::new(WORK_REPO);
     r.mkdir(Path::new(WORK), 0o700)?;
     r.remove(repo)?;
     r.remove(Path::new(steps::SNAPSHOT_MARK))?;
+    let git = || Cmd::new("git").args(["-C", WORK_REPO]);
+    let fork = origin != data.repo_url;
     if update {
-        let cloned = r.check(
-            Cmd::new("git").args(["clone", "-q", &data.repo_url, WORK_REPO]).env("GIT_TERMINAL_PROMPT", "0"),
-            true,
-        )?;
-        if cloned {
+        let clone = github::git_env(Cmd::new("git").args(github::git_auth_args()).args(["clone", "-q", origin, WORK_REPO]));
+        if r.check(clone, true)? {
+            if fork {
+                r.run(git().args(["remote", "add", "upstream", &data.repo_url]))?;
+            }
             return Ok(repo.to_path_buf());
         }
+        r.log(format!("couldn't clone {origin}: using the usb's copy"));
         r.remove(repo)?;
     }
     // A snapshot of the ISO's copy (a read-only store path) with its own history.
     r.run(Cmd::new("cp").args(["-rT", &data.flake, WORK_REPO]))?;
     r.run(Cmd::new("chmod").args(["-R", "u+w", WORK_REPO]))?;
-    let git = || Cmd::new("git").args(["-C", WORK_REPO]);
     r.run(git().args(["init", "-q", "-b", "main"]))?;
-    r.run(git().args(["remote", "add", "origin", &data.repo_url]))?;
+    r.run(git().args(["remote", "add", "origin", origin]))?;
+    if fork {
+        r.run(git().args(["remote", "add", "upstream", &data.repo_url]))?;
+    }
     r.run(git().args(["add", "-A"]))?;
     r.run(git().args([
         "-c",
@@ -91,6 +114,28 @@ pub fn prepare_repo(data: &InstallData, update: bool, mode: Mode) -> Result<Path
     ]))?;
     r.write(Path::new(steps::SNAPSHOT_MARK), b"", 0o644)?;
     Ok(repo.to_path_buf())
+}
+
+// ---------------------------------------------------------------- github (before the install)
+
+/// Ask GitHub for a one-time login code.
+pub fn gh_device_code(mode: Mode) -> (Result<github::DeviceCode>, Vec<String>) {
+    logged(mode, github::device_code)
+}
+
+/// Wait for the code to be entered, then log gh in. `cancel` stops waiting.
+pub fn gh_login(dc: &github::DeviceCode, cancel: &AtomicBool, mode: Mode) -> (Result<()>, Vec<String>) {
+    logged(mode, |r| github::wait_and_login(r, dc, cancel))
+}
+
+/// The logged-in account: owner of `owner/repo`, or their fork (if any).
+pub fn gh_account(owner: &str, repo: &str, mode: Mode) -> (Result<github::Account>, Vec<String>) {
+    logged(mode, |r| github::account(r, owner, repo))
+}
+
+/// Fork `owner/repo` for `login` and wait until it shows up.
+pub fn gh_fork(owner: &str, repo: &str, login: &str, mode: Mode) -> (Result<github::Fork>, Vec<String>) {
+    logged(mode, |r| github::fork(r, owner, repo, login))
 }
 
 /// Unlock (when encrypted) and mount a previous install read-only under
@@ -151,10 +196,44 @@ pub(crate) mod tests {
     const DISK_PW: &str = "disk-pass-Zq9";
     const USER_PW: &str = "login-pass-Xk3";
 
+    pub fn owner_github() -> GitHubPlan {
+        GitHubPlan {
+            login: Some("Vainnor".into()),
+            upstream: "vainnor/nixos".into(),
+            mode: GitHubMode::Owner,
+            push: true,
+            keys: vec!["ssh-ed25519 AAAAowner".into()],
+            full_name: Some("Vainnor".into()),
+            email: Some("vainnor@example.com".into()),
+        }
+    }
+
+    pub fn fork_github() -> GitHubPlan {
+        GitHubPlan {
+            login: Some("someone".into()),
+            upstream: "vainnor/nixos".into(),
+            mode: GitHubMode::Fork { url: "https://github.com/someone/nixos.git".into(), branch: "main".into() },
+            push: true,
+            keys: vec!["ssh-ed25519 AAAAsomeone".into()],
+            full_name: Some("Some One".into()),
+            email: Some("someone@example.com".into()),
+        }
+    }
+
+    pub fn new_host() -> HostPlan {
+        HostPlan::New(NewHost {
+            name: "forge".into(),
+            aspects: vec!["base".into(), "desktop".into(), "dev".into()],
+            gpu: Gpu::Nvidia,
+            state_version: "26.11".into(),
+        })
+    }
+
     pub fn plan_fresh() -> Plan {
         Plan {
             flake: PathBuf::from("/nonexistent/vx-install/nixos"),
-            host: "arc".into(),
+            host: HostPlan::Existing("arc".into()),
+            github: owner_github(),
             system: SystemDisk { device: "/dev/disk/by-id/nvme-SYS".into(), encrypt: true, tpm: true, swap_gb: 16 },
             data: vec![
                 DataDisk {
@@ -221,11 +300,26 @@ pub(crate) mod tests {
                 "write settings into the repo",
                 "partition and format",
                 "set up passwords and keys",
+                "commit the settings",
                 "install the system",
+                "push to github",
                 "put the repo in your home",
                 "finish"
             ]
         );
+        // A new machine detects its hardware after the disks are mounted and
+        // before the commit; the commit is before the install, the push after it.
+        p.host = new_host();
+        let n = names(&p);
+        let at = |s: &str| n.iter().position(|x| x == s).unwrap_or_else(|| panic!("no {s} in {n:?}"));
+        assert!(at("partition and format") < at("detect the hardware"));
+        assert!(at("detect the hardware") < at("commit the settings"));
+        assert!(at("commit the settings") < at("install the system"));
+        assert!(at("install the system") < at("push to github"));
+        assert!(at("push to github") < at("put the repo in your home"));
+        // Offline: nothing to push.
+        p.github = GitHubPlan::offline("vainnor/nixos");
+        assert!(!names(&p).contains(&"push to github".to_string()));
     }
 
     #[test]
@@ -239,7 +333,9 @@ pub(crate) mod tests {
                 "write settings into the repo",
                 "replace the system, keep /home",
                 "restore carried state",
+                "commit the settings",
                 "install the system",
+                "push to github",
                 "put the repo in your home",
                 "finish"
             ]
@@ -287,7 +383,7 @@ pub(crate) mod tests {
 
     fn no_secrets(logs: &[String]) {
         for l in logs {
-            assert!(!l.contains(DISK_PW) && !l.contains(USER_PW), "secret in log: {l}");
+            assert!(!l.contains(DISK_PW) && !l.contains(USER_PW) && !l.contains("gho_"), "secret in log: {l}");
         }
     }
 
@@ -303,8 +399,7 @@ pub(crate) mod tests {
             &[
                 "findmnt -n -o SOURCE /iso",
                 "lsblk -J -p -o NAME,TYPE,FSTYPE,PARTLABEL,MOUNTPOINTS /dev/disk/by-id/nvme-SYS",
-                "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/arc/default.nix modules/hosts/arc/disks.json",
-                "git -C /nonexistent/vx-install/nixos -c user.name=vainnor",
+                "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/arc/disks.json",
                 "nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths /nonexistent/vx-install/nixos#nixosConfigurations.arc.config.system.build.diskoScript",
                 "/nix/store/00000000000000000000000000000000-disko",
                 "mkpasswd -m yescrypt --stdin < (stdin)",
@@ -312,12 +407,17 @@ pub(crate) mod tests {
                 "ssh-to-age < (stdin)",
                 "lsblk -J -p -o NAME,TYPE,FSTYPE,PARTLABEL,MOUNTPOINTS /dev/disk/by-id/nvme-SYS",
                 "cryptsetup luksAddKey --key-file /tmp/vx-install/disk.key /dev/disk/by-id/nvme-SYS-part2 /mnt/persistent/install/tpm-enroll.key",
+                "git -C /nonexistent/vx-install/nixos add -A -- modules/flake/meta.nix modules/hosts/arc",
+                "git -C /nonexistent/vx-install/nixos -c user.name=Vainnor -c user.email=vainnor@example.com -c commit.gpgsign=false commit -q -m 'chore(arc): install settings'",
                 "nixos-install --flake /nonexistent/vx-install/nixos#arc --no-root-passwd --no-channel-copy",
+                "git -C /nonexistent/vx-install/nixos -c credential.https://github.com.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' push -u origin HEAD:main",
                 "cp -a /nonexistent/vx-install/nixos /mnt/home/vainnor/nixos",
-                "nixos-enter --root /mnt -c 'chown -R vainnor:users /home/vainnor/nixos && chown vainnor:users /home/vainnor && chmod 700 /home/vainnor && chown vainnor:users /home/vainnor/games'",
+                "nixos-enter --root /mnt -c 'chown -R vainnor:users /home/vainnor/nixos && chown vainnor:users /home/vainnor && chmod 700 /home/vainnor && chown vainnor:users /home/vainnor/.config /home/vainnor/.config/gh /home/vainnor/.config/gh/hosts.yml && chown vainnor:users /home/vainnor/games'",
                 "umount -R /mnt",
             ],
         );
+        assert!(logs.contains(&"copy /tmp/vx-install/gh/hosts.yml -> /mnt/home/vainnor/.config/gh/hosts.yml (600)".to_string()));
+        assert!(!c.iter().any(|c| c.starts_with("nixos-generate-config")), "an existing host keeps its hardware config");
         assert!(!c.iter().any(|c| c.contains("diskoDataScript") || c.contains("btrfs subvolume")));
         assert!(logs.contains(&"write /tmp/vx-install/disk.key (secret, 600)".to_string()));
         assert!(logs.contains(&"write /tmp/vx-install/keys/games.key (64 random bytes, 600)".to_string()));
@@ -333,6 +433,74 @@ pub(crate) mod tests {
         assert!(!o.host_key_carried);
         assert!(o.next_steps.iter().any(|s| s.contains("vx secrets add-host age1")));
         assert!(o.next_steps.iter().any(|s| s == "sudo netbird up"));
+        assert!(!o.next_steps.iter().any(|s| s.contains("gh auth login")), "gh's login was copied");
+        assert_eq!(o.pushed.as_deref(), Some("vainnor/nixos main"));
+    }
+
+    #[test]
+    fn dry_run_new_host_from_a_fork() {
+        let mut plan = plan_fresh();
+        plan.host = new_host();
+        plan.github = fork_github();
+        plan.settings.hostname = "forge".into();
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        no_secrets(&logs);
+        let c = cmds(&logs);
+        assert_order(
+            &c,
+            &[
+                "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/forge/host.json modules/hosts/forge/disks.json",
+                "nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths /nonexistent/vx-install/nixos#nixosConfigurations.forge.config.system.build.diskoScript",
+                "/nix/store/00000000000000000000000000000000-disko",
+                "nixos-generate-config --no-filesystems --show-hardware-config --root /mnt",
+                "git -C /nonexistent/vx-install/nixos add -- modules/hosts/forge/_hardware.nix",
+                "git -C /nonexistent/vx-install/nixos add -A -- modules/flake/meta.nix modules/hosts/forge",
+                "git -C /nonexistent/vx-install/nixos -c 'user.name=Some One' -c user.email=someone@example.com -c commit.gpgsign=false commit -q -m 'feat(hosts): add forge'",
+                "nixos-install --flake /nonexistent/vx-install/nixos#forge --no-root-passwd --no-channel-copy",
+                "git -C /nonexistent/vx-install/nixos -c credential.https://github.com.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' push -u origin HEAD:main",
+                "cp -a /nonexistent/vx-install/nixos /mnt/home/vainnor/nixos",
+            ],
+        );
+        assert!(logs.contains(&"write /nonexistent/vx-install/nixos/modules/hosts/forge/host.json (644)".to_string()));
+        assert!(logs.contains(&"write /nonexistent/vx-install/nixos/modules/hosts/forge/_hardware.nix (644)".to_string()));
+        assert!(logs.iter().any(|l| l.contains("edit modules/flake/meta.nix for your fork")));
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert_eq!(o.pushed.as_deref(), Some("someone/nixos main"));
+        assert!(o.next_steps.iter().any(|s| s.starts_with("secrets are off")));
+    }
+
+    #[test]
+    fn offline_commits_but_never_pushes() {
+        let mut plan = plan_fresh();
+        plan.github = GitHubPlan::offline("vainnor/nixos");
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        let c = cmds(&logs);
+        assert!(c.iter().any(|c| c.contains(" commit -q -m 'chore(arc): install settings'")));
+        assert!(!c.iter().any(|c| c.contains(" push ")));
+        assert!(!logs.iter().any(|l| l.contains("gh/hosts.yml")), "no gh login to copy");
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert_eq!(o.pushed, None);
+        assert!(o.next_steps.iter().any(|s| s.contains("vx sync")));
+        assert!(o.next_steps.iter().any(|s| s == "gh auth login"));
+    }
+
+    #[test]
+    fn commit_identity_and_message() {
+        let mut p = plan_fresh();
+        assert_eq!(steps::author(&p, Some("meta@x")), ("Vainnor".to_string(), "vainnor@example.com".to_string()));
+        p.github = GitHubPlan::offline("vainnor/nixos");
+        assert_eq!(steps::author(&p, Some("meta@x")), ("vainnor".to_string(), "meta@x".to_string()));
+        assert_eq!(steps::commit_message(&new_host()), "feat(hosts): add forge");
+        assert_eq!(steps::commit_message(&HostPlan::Existing("arc".into())), "chore(arc): install settings");
+        let mut f = plan_fresh();
+        f.github = fork_github();
+        let per = steps::personal(&f, "").unwrap();
+        assert_eq!((per.repo_url.as_str(), per.github_user.as_str()), ("https://github.com/someone/nixos.git", "someone"));
+        f.github.email = None;
+        assert_eq!(steps::personal(&f, "").unwrap().email, "someone@users.noreply.github.com");
+        assert!(steps::personal(&plan_fresh(), "").is_none(), "the owner's meta isn't personalised");
     }
 
     #[test]
@@ -348,7 +516,7 @@ pub(crate) mod tests {
                 "rsync -aHAX --exclude=/install /run/vx-install/old/persistent/ /tmp/vx-install/carry/",
                 "umount /run/vx-install/old/top",
                 "cryptsetup close vx-old",
-                "git -C /nonexistent/vx-install/nixos add",
+                "git -C /nonexistent/vx-install/nixos add -- modules/flake/meta.nix modules/hosts/arc/disks.json",
                 "mount -t btrfs -o subvolid=5 /dev/mapper/cryptroot /tmp/vx-install/top",
                 "btrfs subvolume delete /tmp/vx-install/top/@persistent",
                 "btrfs subvolume create /tmp/vx-install/top/@persistent",
@@ -365,9 +533,11 @@ pub(crate) mod tests {
                 "ssh-to-age",
                 "rsync -aHAX /mnt/persistent/var/lib/sbctl/ /mnt/var/lib/sbctl/",
                 "cryptsetup luksAddKey --key-file /tmp/vx-install/disk.key /dev/nvme0n1p2 /mnt/persistent/install/tpm-enroll.key",
+                "git -C /nonexistent/vx-install/nixos -c user.name=Vainnor",
                 "nixos-install",
+                "git -C /nonexistent/vx-install/nixos -c credential.https://github.com.helper=",
                 "cp -a",
-                "nixos-enter --root /mnt -c 'chown -R vainnor:users /home/vainnor/nixos && chown vainnor:users /home/vainnor && chown vainnor:users /home/vainnor/games'",
+                "nixos-enter --root /mnt -c 'chown -R vainnor:users /home/vainnor/nixos && chown vainnor:users /home/vainnor && chown vainnor:users /home/vainnor/.config /home/vainnor/.config/gh /home/vainnor/.config/gh/hosts.yml && chown vainnor:users /home/vainnor/games'",
                 "umount -R /mnt",
             ],
         );
@@ -440,6 +610,17 @@ pub(crate) mod tests {
         let prev = unlocked().previous;
         let c = previous::open_cmd(&prev, &Secret(DISK_PW.into()));
         assert!(c.args.iter().all(|a| !a.contains(DISK_PW)));
+        // The GitHub token: stdin only, and never in the log of a whole login.
+        let c = github::login_cmd(&Secret("gho_SECRET".into()));
+        assert!(c.args.iter().all(|a| !a.contains("gho_SECRET")) && !c.line().contains("gho_SECRET"));
+        let dc = gh_device_code(Mode::DryRun).0.unwrap();
+        let (res, logs) = gh_login(&dc, &AtomicBool::new(false), Mode::DryRun);
+        res.unwrap();
+        assert!(logs.iter().any(|l| l.starts_with("$ gh auth login --hostname github.com")), "{logs:?}");
+        assert!(logs.iter().all(|l| !l.contains("gho_") && !l.contains(&dc.device_code.0)), "{logs:?}");
+        // The push: no credentials in the URL or argv.
+        let c = steps::push_cmd("/r", "main");
+        assert!(c.args.iter().all(|a| !a.contains('@') || a.contains("helper")));
     }
 
     #[test]
@@ -483,24 +664,43 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_has_no_attribution() {
-        let c = steps::commit_cmd("/r", "vainnor", "me@x");
-        assert_eq!(c.args.last().unwrap(), "chore(arc): install settings from vx install");
+        let c = steps::commit_cmd("/r", "vainnor", "me@x", "chore(arc): install settings");
+        assert_eq!(c.args.last().unwrap(), "chore(arc): install settings");
         assert!(c.args.contains(&"user.name=vainnor".to_string()));
         assert!(!c.line().contains("Co-Authored"));
     }
 
-    #[test]
-    fn prepare_repo_dry() {
-        let data = InstallData {
+    fn data() -> InstallData {
+        InstallData {
             host: "arc".into(),
             repo_url: "https://github.com/vainnor/nixos".into(),
             flake: "/nix/store/abc-source".into(),
             defaults: plan_fresh().settings,
             wallpapers: vec![],
             themes: vec![],
-        };
-        assert_eq!(prepare_repo(&data, true, Mode::DryRun).unwrap(), PathBuf::from(WORK_REPO));
-        assert_eq!(prepare_repo(&data, false, Mode::DryRun).unwrap(), PathBuf::from(WORK_REPO));
+            owner: "vainnor".into(),
+            repo: "nixos".into(),
+            hosts: vec![],
+            aspects: vec![],
+            state_version: "26.11".into(),
+        }
+    }
+
+    #[test]
+    fn prepare_repo_dry() {
+        let data = data();
+        let (p, logs) = prepare_repo(&data, true, &data.repo_url, Mode::DryRun);
+        assert_eq!(p.unwrap(), PathBuf::from(WORK_REPO));
+        assert!(logs.iter().any(|l| l.starts_with("$ git -c credential.https://github.com.helper= ") && l.ends_with("clone -q https://github.com/vainnor/nixos /tmp/vx-install/nixos")), "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("upstream")));
+        // A fork: cloned from the fork, upstream added.
+        let (p, logs) = prepare_repo(&data, true, "https://github.com/someone/nixos.git", Mode::DryRun);
+        p.unwrap();
+        assert!(logs.iter().any(|l| l.ends_with("clone -q https://github.com/someone/nixos.git /tmp/vx-install/nixos")));
+        assert!(logs.contains(&"$ git -C /tmp/vx-install/nixos remote add upstream https://github.com/vainnor/nixos".to_string()));
+        let (p, logs) = prepare_repo(&data, false, &data.repo_url, Mode::DryRun);
+        assert_eq!(p.unwrap(), PathBuf::from(WORK_REPO));
+        assert!(logs.contains(&"$ git -C /tmp/vx-install/nixos remote add origin https://github.com/vainnor/nixos".to_string()));
     }
 
     #[test]

@@ -1,9 +1,11 @@
 //! Installer state: what each screen has collected, background tasks, the
 //! keys, and turning it all into a [`Plan`].
 
+use super::super::engine::github::{Account, DeviceCode, Fork};
+use super::super::engine::settings::host_name;
 use super::super::plan::{
-    Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, HomePlan, InstallData, Machine, Outcome, Plan, Previous, Secret,
-    Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO,
+    Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, GitHubMode, GitHubPlan, Gpu, HomePlan, HostInfo, HostPlan, InstallData,
+    Machine, NewHost, Outcome, Plan, Previous, Secret, Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO, with_requires,
 };
 use super::super::probe::{self, BackupTarget};
 use super::backend::Backend;
@@ -15,6 +17,8 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 pub const LOG_FILE: &str = "/tmp/vx-install/install.log";
@@ -23,6 +27,8 @@ pub const SWAP_CHOICES: [u32; 5] = [0, 8, 16, 32, 64];
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Screen {
     Welcome,
+    GitHub,
+    Machine,
     Previous,
     System,
     Data,
@@ -34,15 +40,17 @@ pub enum Screen {
     Failed,
 }
 
-pub const STEPS: [&str; 8] = ["welcome", "previous", "system", "data", "options", "passwords", "review", "install"];
+pub const STEPS: [&str; 10] = ["welcome", "github", "machine", "previous", "system", "data", "options", "passwords", "review", "install"];
 
 impl Screen {
     pub fn step(self) -> usize {
-        (self as usize).min(7)
+        (self as usize).min(9)
     }
     pub fn title(self) -> &'static str {
         match self {
             Screen::Welcome => "welcome",
+            Screen::GitHub => "github",
+            Screen::Machine => "machine",
             Screen::Previous => "previous install",
             Screen::System => "system drive",
             Screen::Data => "data drives",
@@ -76,6 +84,21 @@ pub enum Use {
 pub enum Field {
     FetchLatest,
     Start,
+    GhLogin,
+    GhCancel,
+    GhSkip,
+    GhPush,
+    GhFork,
+    GhQuit,
+    /// An existing host (index into App::hosts()).
+    Host(usize),
+    NewHost,
+    HostName,
+    /// A feature of a new host (index into the install data's aspects).
+    Aspect(usize),
+    Gpu,
+    FullName,
+    Email,
     UnlockPassword,
     Unlock,
     SkipPrevious,
@@ -93,7 +116,6 @@ pub enum Field {
     Encrypt,
     Tpm,
     Swap,
-    Hostname,
     Username,
     TimeZone,
     Theme,
@@ -117,7 +139,9 @@ impl Field {
             Field::UnlockPassword
                 | Field::DataName(_)
                 | Field::DataMount(_)
-                | Field::Hostname
+                | Field::HostName
+                | Field::FullName
+                | Field::Email
                 | Field::Username
                 | Field::TimeZone
                 | Field::DiskPw1
@@ -179,9 +203,61 @@ pub enum Modal {
 
 pub enum TaskOut {
     Probed(Box<Machine>, Result<Vec<DiskInfo>, String>),
-    Prepared(Result<(Box<InstallData>, PathBuf, Option<String>), String>),
+    /// The usb's install data (before the github step).
+    Loaded(Result<Box<InstallData>, String>),
+    /// The work repo is ready (data rebuilt from it, a warning), with the commands it ran.
+    Prepared(Result<Prepared, String>, Vec<String>),
     Unlocked(Result<Box<Unlocked>, String>),
     Backup(Vec<BackupTarget>),
+    /// GitHub work, with the commands it ran (for the install log).
+    Gh(GhOut, Vec<String>),
+}
+
+pub enum GhOut {
+    Code(Result<DeviceCode, String>),
+    LoggedIn(Result<(), String>),
+    Account(Result<Box<Account>, String>),
+    Forked(Result<Fork, String>),
+}
+
+/// Where the github step is.
+#[derive(Clone, Debug)]
+pub enum GhPhase {
+    /// Not logged in yet.
+    Start,
+    /// Showing the code, waiting for it to be entered on github.com.
+    Code(DeviceCode),
+    /// Logged in.
+    Account(Box<Account>),
+}
+
+pub struct Gh {
+    pub phase: GhPhase,
+    pub error: Option<String>,
+    /// GitHub couldn't be reached: skipping (offline) is allowed.
+    pub unreachable: bool,
+    /// Skipped: an offline install.
+    pub skipped: bool,
+    /// Owner: push the install commit at the end.
+    pub push: bool,
+    /// Stops the background wait for the code.
+    pub cancel: Option<Arc<AtomicBool>>,
+    /// The background wait (the screen stays usable meanwhile).
+    pub rx: Option<Receiver<TaskOut>>,
+}
+
+impl Gh {
+    pub fn account(&self) -> Option<&Account> {
+        match &self.phase {
+            GhPhase::Account(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    /// Logged in as the owner, or with a fork to use.
+    pub fn ready(&self) -> bool {
+        self.account().is_some_and(|a| a.owner || a.fork.is_some())
+    }
 }
 
 pub struct Task {
@@ -254,9 +330,22 @@ pub struct App {
     pub data: Option<InstallData>,
     pub work_repo: Option<PathBuf>,
     pub fetch_latest: bool,
-    /// The fetch setting the repo was prepared with.
-    pub prepared_with: Option<bool>,
+    /// The fetch setting and origin the repo was prepared with.
+    pub prepared_with: Option<(bool, String)>,
     pub probe_error: Option<String>,
+    /// Commands run before the install (github, the repo): go first in the install log.
+    pub pre_log: Vec<String>,
+
+    pub gh: Gh,
+    pub full_name: Input,
+    pub email: Input,
+
+    /// The machine: an existing host's name, or None for a new machine.
+    pub host_choice: Option<String>,
+    pub host_defaults_set: bool,
+    pub new_name: Input,
+    pub new_aspects: BTreeSet<String>,
+    pub new_gpu: Gpu,
 
     pub unlock_pw: Input,
     pub unlock_error: Option<String>,
@@ -276,7 +365,6 @@ pub struct App {
     pub encrypt: bool,
     pub tpm: bool,
     pub swap_gb: u32,
-    pub hostname: Input,
     pub username: Input,
     pub time_zone: Input,
     pub theme_idx: usize,
@@ -321,6 +409,15 @@ impl App {
             fetch_latest: !offline,
             prepared_with: None,
             probe_error: None,
+            pre_log: vec![],
+            gh: Gh { phase: GhPhase::Start, error: None, unreachable: false, skipped: false, push: true, cancel: None, rx: None },
+            full_name: Input::default(),
+            email: Input::default(),
+            host_choice: None,
+            host_defaults_set: false,
+            new_name: Input::default(),
+            new_aspects: BTreeSet::new(),
+            new_gpu: Gpu::None,
             unlock_pw: Input::secret(),
             unlock_error: None,
             unlocked: None,
@@ -336,7 +433,6 @@ impl App {
             encrypt: true,
             tpm: false,
             swap_gb: 16,
-            hostname: Input::default(),
             username: Input::default(),
             time_zone: Input::default(),
             theme_idx: 0,
@@ -392,6 +488,16 @@ impl App {
                 Err(TryRecvError::Empty) => {}
             }
         }
+        if let Some(rx) = &self.gh.rx {
+            match rx.try_recv() {
+                Ok(out) => {
+                    self.gh.rx = None;
+                    self.apply(out);
+                }
+                Err(TryRecvError::Disconnected) => self.gh.rx = None,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
         self.poll_progress();
     }
 
@@ -404,16 +510,32 @@ impl App {
                     Err(e) => self.probe_error = Some(e),
                 }
             }
-            TaskOut::Prepared(Ok((data, work, warning))) => {
+            TaskOut::Loaded(Ok(data)) => {
                 self.set_data(*data);
-                self.work_repo = Some(work);
-                self.prepared_with = Some(self.fetch_latest);
-                self.go(if self.previous.is_some() { Screen::Previous } else { Screen::System });
-                if let Some(w) = warning {
-                    self.say(Level::Warn, w);
+                self.go(Screen::GitHub);
+            }
+            TaskOut::Loaded(Err(e)) => self.say(Level::Error, e),
+            TaskOut::Prepared(res, logs) => {
+                self.pre_log.extend(logs);
+                match res {
+                    Ok((data, work, warning)) => {
+                        let origin = self.origin();
+                        self.set_data(*data);
+                        self.set_host_defaults();
+                        self.work_repo = Some(work);
+                        self.prepared_with = Some((self.fetch_latest, origin));
+                        self.go(Screen::Machine);
+                        if let Some(w) = warning {
+                            self.say(Level::Warn, w);
+                        }
+                    }
+                    Err(e) => self.say(Level::Error, e),
                 }
             }
-            TaskOut::Prepared(Err(e)) => self.say(Level::Error, e),
+            TaskOut::Gh(out, logs) => {
+                self.pre_log.extend(logs);
+                self.apply_gh(out);
+            }
             TaskOut::Unlocked(Ok(u)) => {
                 self.carry = u.available.clone();
                 self.unlock_secret = u.previous.encrypted.then(|| Secret(self.unlock_pw.value.clone()));
@@ -475,11 +597,155 @@ impl App {
         }
     }
 
+    fn apply_gh(&mut self, out: GhOut) {
+        match out {
+            GhOut::Code(Ok(dc)) => {
+                self.gh.error = None;
+                self.gh.unreachable = false;
+                self.gh.phase = GhPhase::Code(dc.clone());
+                self.wait_for_login(dc);
+            }
+            GhOut::Code(Err(e)) => {
+                // No code at all: github can't be reached from here.
+                self.gh.unreachable = true;
+                self.gh.error = Some(e);
+            }
+            GhOut::LoggedIn(Ok(())) => {
+                self.gh.cancel = None;
+                let (b, (owner, repo)) = (self.backend, self.upstream());
+                self.spawn("reading your github account", move || {
+                    let (res, logs) = b.gh_account(&owner, &repo);
+                    TaskOut::Gh(GhOut::Account(res.map(Box::new).map_err(|e| format!("{e:#}"))), logs)
+                });
+            }
+            GhOut::LoggedIn(Err(e)) => {
+                self.gh.cancel = None;
+                self.gh.phase = GhPhase::Start;
+                if e != "cancelled" {
+                    self.gh.error = Some(e);
+                }
+            }
+            GhOut::Account(Ok(a)) => {
+                // From this account (they're edited on the options screen, after this one).
+                self.gh.error = None;
+                self.full_name = Input::new(a.name.as_deref().unwrap_or(&a.login));
+                self.email = Input::new(a.email.as_deref().unwrap_or(""));
+                self.gh.phase = GhPhase::Account(a);
+                self.focus = None;
+            }
+            GhOut::Account(Err(e)) => {
+                self.gh.phase = GhPhase::Start;
+                self.gh.error = Some(e);
+            }
+            GhOut::Forked(Ok(f)) => {
+                if let GhPhase::Account(a) = &mut self.gh.phase {
+                    a.fork = Some(f);
+                }
+                self.focus = None;
+                self.say(Level::Ok, "forked");
+            }
+            GhOut::Forked(Err(e)) => self.gh.error = Some(e),
+        }
+    }
+
+    /// [ log in ]: get a code; the wait for it runs in the background.
+    pub fn gh_login(&mut self) {
+        self.gh.error = None;
+        let b = self.backend;
+        self.spawn("asking github for a code", move || {
+            let (res, logs) = b.gh_device_code();
+            TaskOut::Gh(GhOut::Code(res.map_err(|e| format!("couldn't reach github: {e:#}"))), logs)
+        });
+    }
+
+    fn wait_for_login(&mut self, dc: DeviceCode) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.gh.cancel = Some(cancel.clone());
+        let (tx, rx) = mpsc::channel();
+        let b = self.backend;
+        let _ = std::thread::Builder::new().name("gh-login".into()).spawn(move || {
+            let (res, logs) = b.gh_login(&dc, &cancel);
+            let _ = tx.send(TaskOut::Gh(GhOut::LoggedIn(res.map_err(|e| format!("{e:#}"))), logs));
+        });
+        self.gh.rx = Some(rx);
+    }
+
+    pub fn gh_cancel(&mut self) {
+        if let Some(c) = self.gh.cancel.take() {
+            c.store(true, Ordering::SeqCst);
+        }
+        self.gh.rx = None;
+        self.gh.phase = GhPhase::Start;
+    }
+
+    pub fn gh_fork(&mut self) {
+        let Some(login) = self.gh.account().map(|a| a.login.clone()) else { return };
+        let (b, (owner, repo)) = (self.backend, self.upstream());
+        self.gh.error = None;
+        self.spawn(&format!("forking {owner}/{repo}"), move || {
+            let (res, logs) = b.gh_fork(&owner, &repo, &login);
+            TaskOut::Gh(GhOut::Forked(res.map_err(|e| format!("{e:#}"))), logs)
+        });
+    }
+
+    /// Upstream (owner, repo).
+    pub fn upstream(&self) -> (String, String) {
+        self.data.as_ref().map(|d| d.upstream()).unwrap_or_default()
+    }
+
+    /// The github step is part of this install (online, not --offline).
+    pub fn uses_github(&self) -> bool {
+        !self.offline && self.machine.as_ref().is_some_and(|m| m.online)
+    }
+
+    /// Where the work repo comes from: the fork, else upstream.
+    pub fn origin(&self) -> String {
+        if let Some(f) = self.gh.account().and_then(|a| a.fork.as_ref()).filter(|_| !self.gh.skipped) {
+            return f.url.clone();
+        }
+        self.data.as_ref().map(|d| d.repo_url.clone()).unwrap_or_default()
+    }
+
+    /// Hosts in the repo (older data: just the default host).
+    pub fn hosts(&self) -> Vec<HostInfo> {
+        let Some(d) = &self.data else { return vec![] };
+        if d.hosts.is_empty() {
+            return vec![HostInfo { name: d.host.clone(), aspects: vec![], gpu: Gpu::None }];
+        }
+        d.hosts.clone()
+    }
+
+    /// Every aspect's name (a new host can't be called one).
+    pub fn aspect_names(&self) -> Vec<&str> {
+        self.data.as_ref().map(|d| d.aspects.iter().map(|a| a.name.as_str()).collect()).unwrap_or_default()
+    }
+
+    /// Reinstall the previous install's host when there is one, else a new machine.
+    pub fn set_host_defaults(&mut self) {
+        let hosts = self.hosts();
+        if self.host_choice.as_ref().is_some_and(|h| !hosts.iter().any(|x| &x.name == h)) {
+            self.host_choice = None;
+        }
+        if self.host_defaults_set {
+            return;
+        }
+        let Some(d) = &self.data else { return };
+        self.host_choice = if self.previous.is_some() && hosts.iter().any(|h| h.name == d.host) { Some(d.host.clone()) } else { None };
+        self.new_aspects = d.aspects.iter().filter(|a| a.default && a.name != "base").map(|a| a.name.clone()).collect();
+        with_requires(&d.aspects, &mut self.new_aspects);
+        self.new_gpu = self.machine.as_ref().map(|m| m.gpu).unwrap_or_default();
+        self.host_defaults_set = true;
+    }
+
+    /// The host name: the existing host's, or the typed one.
+    pub fn host_name(&self) -> String {
+        self.host_choice.clone().unwrap_or_else(|| self.new_name.value.clone())
+    }
+
     pub fn set_data(&mut self, data: InstallData) {
         self.theme = Theme::pick(Some(&data), self.ansi);
         if !self.defaults_set {
             let d = &data.defaults;
-            self.hostname = Input::new(&d.hostname);
             self.username = Input::new(&d.username);
             self.time_zone = Input::new(&d.time_zone);
             self.theme_idx = self.theme_names_of(&data).iter().position(|t| *t == d.theme).unwrap_or(0);
@@ -497,29 +763,37 @@ impl App {
         self.data.as_ref().map(|d| self.theme_names_of(d)).unwrap_or_else(|| vec!["match".into()])
     }
 
-    /// Welcome's [ start ]: load install-data, make the work repo, rebuild the data from it.
+    /// Welcome's [ start ]: the github step when online, else straight to preparing the repo.
+    pub fn start_flow(&mut self) {
+        if !self.uses_github() {
+            return self.prepare();
+        }
+        if self.data.is_some() {
+            return self.go(Screen::GitHub);
+        }
+        let (b, path, repo) = (self.backend, self.data_path.clone(), self.repo.clone());
+        self.spawn("loading the install data", move || {
+            let d = b.load_data(path.as_deref(), if path.is_some() { None } else { repo.as_deref() });
+            TaskOut::Loaded(d.map(Box::new).map_err(|e| format!("couldn't load the install data: {e:#}")))
+        });
+    }
+
+    /// Make the work repo (clone of the fork or upstream, or the usb's copy),
+    /// rebuild the data from it, then the machine step.
     pub fn prepare(&mut self) {
-        if let (Some(_), Some(p)) = (&self.work_repo, self.prepared_with)
-            && p == self.fetch_latest
-        {
-            self.go(if self.previous.is_some() { Screen::Previous } else { Screen::System });
+        let origin = self.origin();
+        if self.work_repo.is_some() && self.prepared_with.as_ref() == Some(&(self.fetch_latest, origin.clone())) {
+            self.go(Screen::Machine);
             return;
         }
         let (b, fetch, path, repo) = (self.backend, self.fetch_latest, self.data_path.clone(), self.repo.clone());
-        let label = if fetch { "fetching the latest repo from github" } else { "copying the repo from the usb" };
-        self.spawn(label, move || {
-            let run = || -> Result<_, String> {
-                let initial = b.load_data(path.as_deref(), if path.is_some() { None } else { repo.as_deref() }).map_err(|e| format!("couldn't load the install data: {e:#}"))?;
-                let work = b.prepare_repo(&initial, fetch).map_err(|e| format!("couldn't prepare the repo: {e:#}"))?;
-                if !fetch {
-                    return Ok((Box::new(initial), work, None));
-                }
-                match b.load_data(None, Some(&work)) {
-                    Ok(d) => Ok((Box::new(d), work, None)),
-                    Err(e) => Ok((Box::new(initial), work, Some(format!("using the usb's defaults ({e:#})")))),
-                }
-            };
-            TaskOut::Prepared(run())
+        let have = self.data.clone();
+        let label = if fetch { format!("fetching {} from github", origin.trim_start_matches("https://github.com/")) } else { "copying the repo from the usb".into() };
+        self.spawn(&label, move || {
+            let mut logs = vec![];
+            let r = prepare_task(b, fetch, path.as_deref(), repo.as_deref(), have, origin, &mut logs);
+            // The commands go to the install log with everything else.
+            TaskOut::Prepared(r, logs)
         });
     }
 
@@ -727,6 +1001,10 @@ impl App {
 
     pub fn order(&self) -> Vec<Screen> {
         let mut v = vec![Screen::Welcome];
+        if self.uses_github() {
+            v.push(Screen::GitHub);
+        }
+        v.push(Screen::Machine);
         if self.previous.is_some() {
             v.push(Screen::Previous);
         }
@@ -745,6 +1023,9 @@ impl App {
     }
 
     pub fn back(&mut self) {
+        if self.screen == Screen::GitHub {
+            self.gh_cancel();
+        }
         let o = self.order();
         if let Some(i) = o.iter().position(|s| *s == self.screen)
             && i > 0
@@ -763,6 +1044,9 @@ impl App {
             self.start_install();
             return;
         }
+        if self.screen == Screen::GitHub {
+            return self.prepare();
+        }
         let o = self.order();
         if let Some(i) = o.iter().position(|s| *s == self.screen)
             && i + 1 < o.len()
@@ -777,6 +1061,8 @@ impl App {
     pub fn check(&self, s: Screen) -> Result<(), String> {
         match s {
             Screen::Welcome => Ok(()),
+            Screen::GitHub => self.check_github(),
+            Screen::Machine => self.check_machine(),
             Screen::Previous => self.check_previous(),
             Screen::System => self.check_system(),
             Screen::Data => self.check_data(),
@@ -794,6 +1080,38 @@ impl App {
                 Ok(())
             }
             _ => Ok(()),
+        }
+    }
+
+    fn check_github(&self) -> Result<(), String> {
+        if !self.uses_github() || self.gh.skipped || self.gh.ready() {
+            return Ok(());
+        }
+        match self.gh.account() {
+            Some(a) => {
+                let (owner, repo) = self.upstream();
+                Err(format!("{} has no fork of {owner}/{repo}: fork it first", a.login))
+            }
+            None => Err("log in to github first".into()),
+        }
+    }
+
+    fn check_machine(&self) -> Result<(), String> {
+        let hosts = self.hosts();
+        match &self.host_choice {
+            Some(h) if hosts.iter().any(|x| &x.name == h) => Ok(()),
+            Some(h) => Err(format!("{h} isn't in the repo: pick the machine again")),
+            None => {
+                let n = &self.new_name.value;
+                host_name(n, &self.aspect_names())?;
+                if hosts.iter().any(|h| h.name.eq_ignore_ascii_case(n)) {
+                    return Err(format!("name: {n} is already in the repo: pick it above to reinstall it"));
+                }
+                if self.data.as_ref().is_some_and(|d| d.state_version.is_empty()) {
+                    return Err("the install data has no stateVersion: rebuild the usb from a newer repo".into());
+                }
+                Ok(())
+            }
         }
     }
 
@@ -853,8 +1171,12 @@ impl App {
     }
 
     fn check_options(&self) -> Result<(), String> {
-        validate::hostname(&self.hostname.value)?;
+        validate::hostname(&self.host_name())?;
         validate::username(&self.username.value)?;
+        if self.forking() {
+            validate::full_name(&self.full_name.value)?;
+            validate::email(&self.email.value)?;
+        }
         validate::time_zone(&self.time_zone.value, Some(Path::new("/etc/zoneinfo")))?;
         // Data mount paths under the old username would now be wrong.
         self.check_data()
@@ -882,8 +1204,55 @@ impl App {
 
     // ------------------------------------------------------------ the plan
 
+    /// Installing from the user's fork (meta.nix gets their name and email).
+    pub fn forking(&self) -> bool {
+        !self.gh.skipped && self.gh.account().is_some_and(|a| !a.owner && a.fork.is_some())
+    }
+
+    pub fn github_plan(&self) -> GitHubPlan {
+        let (owner, repo) = self.upstream();
+        let upstream = format!("{owner}/{repo}");
+        let Some(a) = self.gh.account().filter(|_| self.uses_github() && !self.gh.skipped) else {
+            return GitHubPlan::offline(&upstream);
+        };
+        let mode = match (&a.fork, a.owner) {
+            (_, true) => GitHubMode::Owner,
+            (Some(f), false) => GitHubMode::Fork { url: f.url.clone(), branch: f.branch.clone() },
+            (None, false) => return GitHubPlan::offline(&upstream),
+        };
+        let fork = matches!(mode, GitHubMode::Fork { .. });
+        let typed = |i: &Input, fallback: &Option<String>| {
+            if fork { Some(i.value.trim().to_string()).filter(|s| !s.is_empty()) } else { fallback.clone() }
+        };
+        GitHubPlan {
+            login: Some(a.login.clone()),
+            upstream,
+            push: if fork { true } else { self.gh.push },
+            mode,
+            keys: a.keys.clone(),
+            full_name: typed(&self.full_name, &a.name),
+            email: typed(&self.email, &a.email),
+        }
+    }
+
+    pub fn host_plan(&self) -> Result<HostPlan, String> {
+        self.check_machine()?;
+        Ok(match &self.host_choice {
+            Some(h) => HostPlan::Existing(h.clone()),
+            None => {
+                let data = self.data.as_ref().ok_or("the install data isn't loaded")?;
+                let mut chosen = self.new_aspects.clone();
+                with_requires(&data.aspects, &mut chosen);
+                let mut aspects = vec!["base".to_string()];
+                // In the data's order.
+                aspects.extend(data.aspects.iter().filter(|a| chosen.contains(&a.name)).map(|a| a.name.clone()));
+                HostPlan::New(NewHost { name: self.new_name.value.clone(), aspects, gpu: self.new_gpu, state_version: data.state_version.clone() })
+            }
+        })
+    }
+
     pub fn build_plan(&self) -> Result<Plan, String> {
-        for s in [Screen::Previous, Screen::System, Screen::Data, Screen::Options, Screen::Passwords] {
+        for s in [Screen::GitHub, Screen::Machine, Screen::Previous, Screen::System, Screen::Data, Screen::Options, Screen::Passwords] {
             self.check(s)?;
         }
         let data = self.data.as_ref().ok_or("the install data isn't loaded")?;
@@ -939,18 +1308,20 @@ impl App {
             Some(Secret(self.login_pw1.value.clone()))
         };
         let themes = self.theme_names();
+        let host = self.host_plan()?;
         Ok(Plan {
             flake: PathBuf::from(WORK_REPO),
-            host: data.host.clone(),
-            system: SystemDisk { device: id(sys), encrypt, tpm: encrypt && self.tpm, swap_gb: self.eff_swap() },
-            data: disks,
             settings: Settings {
-                hostname: self.hostname.value.clone(),
+                hostname: host.name().to_string(),
                 username: self.username.value.clone(),
                 time_zone: self.time_zone.value.clone(),
                 wallpaper: data.wallpapers.get(self.wallpaper_idx).map(|w| w.name.clone()).unwrap_or_else(|| data.defaults.wallpaper.clone()),
                 theme: themes.get(self.theme_idx).cloned().unwrap_or_else(|| "match".into()),
             },
+            host,
+            github: self.github_plan(),
+            system: SystemDisk { device: id(sys), encrypt, tpm: encrypt && self.tpm, swap_gb: self.eff_swap() },
+            data: disks,
             disk_password,
             user_password,
             previous: self.unlocked.clone(),
@@ -968,6 +1339,9 @@ impl App {
         if self.write_log {
             let _ = std::fs::create_dir_all(WORK);
             p.log_file = std::fs::File::create(LOG_FILE).ok();
+        }
+        for l in self.pre_log.clone() {
+            p.push_log(l);
         }
         let (tx, rx) = mpsc::channel();
         let (dtx, drx) = mpsc::channel();
@@ -1177,7 +1551,9 @@ impl App {
                 self.data_rows[i].mount_edited = true;
                 &mut self.data_rows[i].mount
             }
-            Field::Hostname => &mut self.hostname,
+            Field::HostName => &mut self.new_name,
+            Field::FullName => &mut self.full_name,
+            Field::Email => &mut self.email,
             Field::Username => &mut self.username,
             Field::TimeZone => &mut self.time_zone,
             Field::DiskPw1 => &mut self.disk_pw1,
@@ -1254,4 +1630,36 @@ impl App {
 
 pub fn short(dev: &str) -> &str {
     dev.strip_prefix("/dev/").unwrap_or(dev)
+}
+
+/// The data rebuilt from the work repo, the repo, and a warning to show.
+pub type Prepared = (Box<InstallData>, PathBuf, Option<String>);
+
+/// The background half of [`App::prepare`].
+fn prepare_task(
+    b: Backend,
+    fetch: bool,
+    path: Option<&Path>,
+    repo: Option<&Path>,
+    have: Option<InstallData>,
+    origin: String,
+    logs: &mut Vec<String>,
+) -> Result<Prepared, String> {
+    let initial = match have {
+        Some(d) => d,
+        None => b
+            .load_data(path, if path.is_some() { None } else { repo })
+            .map_err(|e| format!("couldn't load the install data: {e:#}"))?,
+    };
+    let origin = if origin.is_empty() { initial.repo_url.clone() } else { origin };
+    let (work, l) = b.prepare_repo(&initial, fetch, &origin);
+    logs.extend(l);
+    let work = work.map_err(|e| format!("couldn't prepare the repo: {e:#}"))?;
+    if !fetch {
+        return Ok((Box::new(initial), work, None));
+    }
+    match b.load_data(None, Some(&work)) {
+        Ok(d) => Ok((Box::new(d), work, None)),
+        Err(e) => Ok((Box::new(initial), work, Some(format!("using the usb's defaults ({e:#})")))),
+    }
 }

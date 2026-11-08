@@ -25,11 +25,13 @@ in
   flake.modules.homeManager.desktop =
     {
       config,
+      osConfig,
       pkgs,
       lib,
       ...
     }:
     let
+      host = osConfig.vx.host;
       c = config.lib.stylix.colors;
       src = lib.fileset.toSource {
         root = ../../shell;
@@ -65,7 +67,9 @@ in
             border = if palette.extra.border != null then palette.extra.border else c.base02;
             accent2 = if palette.extra.accent2 != null then palette.extra.accent2 else c.base0F;
             font = config.stylix.fonts.monospace.name;
-            primaryModel = "VG34VQL3A"; # the ultrawide gets pop-ups and the OSD
+            # The main screen (host.json primaryMonitor) gets pop-ups and the OSD;
+            # null = the first screen.
+            primaryModel = host.primaryMonitor;
           }
         )
       );
@@ -116,7 +120,7 @@ in
             "VSHELL_WALLPAPER=${wallpaper}"
             "VSHELL_WALLPAPER_NAME=${toString meta.wallpaper}"
             "VSHELL_WALLPAPERS=${wallpapers}"
-            "VSHELL_AUDIO_OUTPUT=${toString meta.audioOutput}"
+            "VSHELL_AUDIO_OUTPUT=${toString host.audioOutput}"
             # Programs the shell starts (nmcli, cliphist, qalc, mmsg, sudo, ...).
             "PATH=/run/wrappers/bin:/etc/profiles/per-user/${meta.username}/bin:/run/current-system/sw/bin"
           ];

@@ -75,8 +75,13 @@ pub fn summary_rows(app: &App, w: usize) -> Vec<Row> {
     r.push(if o.host_key_carried {
         Row::colored(t.green, "secrets already work: the old ssh host key was carried over")
     } else {
-        Row::colored(t.yellow, "secrets need the new key: add it on the mac (see below)")
+        Row::colored(t.yellow, "secrets need the new key (see below)")
     });
+    match (&o.pushed, &o.not_pushed) {
+        (Some(p), _) => r.push(Row::colored(t.green, format!("pushed to github: {p}"))),
+        (None, Some(why)) => r.push(Row::colored(t.yellow, format!("not pushed: {why}"))),
+        (None, None) => {}
+    }
     r.push(Row::blank());
     r.push(Row::heading(t, "next"));
     for (i, s) in o.next_steps.iter().enumerate() {

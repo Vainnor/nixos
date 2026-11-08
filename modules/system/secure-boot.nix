@@ -5,8 +5,8 @@
 #      installed unsigned. First boot generates your own keys (/var/lib/sbctl,
 #      persisted), signs the boot files and prepares enrollment.
 #   2. In the BIOS, put Secure Boot into Setup Mode (clear/delete keys), reboot.
-#      systemd-boot enrolls your keys + Microsoft's (Windows and the 7900 XTX
-#      option ROM need them). Then turn Secure Boot ON in the BIOS.
+#      systemd-boot enrolls your keys + Microsoft's (Windows and graphics
+#      card option ROMs need them). Then turn Secure Boot ON in the BIOS.
 #   3. The first boot with Secure Boot on enrolls the TPM by itself
 #      (tpm-first-boot-enroll below, when the installer chose TPM unlock): the
 #      disk then unlocks itself as long as Secure Boot state (PCR 7) is
@@ -17,7 +17,7 @@
 # firmware: the boot files are signed at install time, so just turn Secure
 # Boot on in the BIOS (no Setup Mode); step 3 follows by itself.
 #
-# The tpm2-device=auto crypttab option on cryptroot lives in hosts/arc/_disko.nix
+# The tpm2-device=auto crypttab option on cryptroot lives in hosts/_disko.nix
 # (only when the disk is encrypted).
 { inputs, ... }:
 {

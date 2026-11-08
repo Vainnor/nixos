@@ -81,7 +81,7 @@ pub fn act(app: &mut App, f: Field, a: Act) {
             if app.backend.is_real() && !m.uefi {
                 return app.say(Level::Error, "booted without uefi: reboot the usb in uefi mode");
             }
-            app.prepare();
+            app.start_flow();
         }
         _ => {}
     }

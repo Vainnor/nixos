@@ -3,7 +3,7 @@
 //! the whole `nix flake check` and a real signing test (1Password asks).
 
 use super::util::{binary_cache, meta_bool, meta_src, meta_str, run_timeout};
-use crate::ctx::{self, Ctx, Host, MAC_HOST, NIXOS_HOST};
+use crate::ctx::{self, Ctx, Host, MAC_HOST};
 use crate::ui;
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
@@ -61,7 +61,7 @@ pub fn run(ctx: &Ctx, full: bool) -> Result<()> {
     let sock = agent(ctx, &meta, &mut r);
     signing(ctx, &meta, sock.as_deref(), full, &mut r);
 
-    if ctx.is_arc() {
+    if ctx.is_nixos() {
         ui::heading("desktop");
         keyring(&mut r);
         mango(&mut r);
@@ -118,7 +118,7 @@ fn check(c: &mut Command, dur: Duration, keep_out: bool) -> Option<(bool, String
 
 fn nix_daemon(ctx: &Ctx, r: &mut Report) {
     let fix = match ctx.host {
-        Host::Arc => "sudo systemctl restart nix-daemon",
+        Host::NixOs => "sudo systemctl restart nix-daemon",
         Host::Mac => "sudo launchctl kickstart -k system/org.nixos.nix-daemon",
     };
     for sub in ["info", "ping"] {
@@ -163,7 +163,7 @@ fn caches(meta: &str, r: &mut Report) {
 fn flake(ctx: &Ctx, full: bool, r: &mut Report) {
     let repo = ctx.repo.display().to_string();
     let attr = match ctx.host {
-        Host::Arc => format!("{repo}#nixosConfigurations.{NIXOS_HOST}.config.system.build.toplevel.drvPath"),
+        Host::NixOs => format!("{repo}#nixosConfigurations.{}.config.system.build.toplevel.drvPath", ctx.nixos_host()),
         Host::Mac => format!("{repo}#darwinConfigurations.{MAC_HOST}.system.drvPath"),
     };
     ui::dim("evaluating this machine's config...");
@@ -204,7 +204,7 @@ fn secrets(ctx: &Ctx, repo: &Path, meta: &str, r: &mut Report) {
                 ),
             }
         }
-        Host::Arc => {
+        Host::NixOs => {
             if meta_bool(meta, "secretsReady") != Some(true) {
                 return r.info("secrets are off (meta.secretsReady = false; README \"Secrets\")");
             }
@@ -253,7 +253,7 @@ fn home() -> PathBuf {
 /// the app's fixed location on the Mac.
 fn agent_sock(host: Host) -> PathBuf {
     match host {
-        Host::Arc => home().join(".1password/agent.sock"),
+        Host::NixOs => home().join(".1password/agent.sock"),
         Host::Mac => home().join("Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"),
     }
 }
@@ -292,7 +292,7 @@ fn agent(ctx: &Ctx, meta: &str, r: &mut Report) -> Option<PathBuf> {
         r.warn(
             &format!("SSH_AUTH_SOCK is {} instead of the 1password agent", if env.is_empty() { "unset" } else { &env }),
             match ctx.host {
-                Host::Arc => "log out and back in (home-manager sets it for new sessions)",
+                Host::NixOs => "log out and back in (home-manager sets it for new sessions)",
                 Host::Mac => "add IdentityAgent \"~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock\" to ~/.ssh/config",
             },
         );

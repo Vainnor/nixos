@@ -1,12 +1,11 @@
-# RX 7900 XTX: open amdgpu + Mesa RADV (no proprietary driver), 32-bit for
-# Proton, VA-API video decode, and LACT for fan curves / power limit / undervolt.
+# Graphics for games: 32-bit drivers for Proton and older games. The driver
+# itself, video decode and GPU tuning (LACT on AMD) follow the host's `gpu`
+# (system/gpu.nix).
 {
   flake.modules.nixos.gaming = {
     hardware.graphics = {
       enable = true;
       enable32Bit = true;
     };
-    hardware.amdgpu.overdrive.enable = true;
-    services.lact.enable = true;
   };
 }

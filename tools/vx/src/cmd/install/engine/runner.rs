@@ -156,6 +156,15 @@ impl Runner {
         Ok(out)
     }
 
+    /// Run it, logging the command but not its output: (exited 0, stdout, last
+    /// lines of output). For callers that tell failures apart themselves.
+    pub fn output(&self, c: &Cmd) -> Result<(bool, String, String)> {
+        if !self.dry() {
+            self.log(format!("$ {}", c.line()));
+        }
+        self.exec(c, c.fake.clone(), false)
+    }
+
     fn exec(&self, c: &Cmd, fake: String, forward: bool) -> Result<(bool, String, String)> {
         if forward || self.dry() {
             self.log(format!("$ {}", c.line()));

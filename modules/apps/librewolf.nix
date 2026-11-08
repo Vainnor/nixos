@@ -5,7 +5,7 @@
 # Same look as the Mac: tabs live in Sidebery (vertical, in the sidebar), the
 # tab strip and sidebar header are hidden, every corner is square, and the
 # about: pages use the system palette (assets/librewolf).
-{ config, ... }:
+{ config, lib, ... }:
 let
   inherit (config) meta;
   palette = import ../../assets/themes meta;
@@ -73,7 +73,7 @@ in
           "privacy.clearOnShutdown.history" = false;
           "privacy.clearOnShutdown.downloads" = false;
           "webgl.disabled" = false;
-          "media.ffmpeg.vaapi.enabled" = true; # hardware video decode on the 7900 XTX
+          "media.ffmpeg.vaapi.enabled" = true; # hardware video decode (any VA-API driver, see system/gpu.nix)
 
           # Load chrome/userChrome.css and userContent.css.
           "toolkit.legacyUserProfileCustomizations.stylesheets" = true;
@@ -119,16 +119,17 @@ in
 
   # The Mac keeps its own LibreWolf install and profile (Home Manager leaves
   # profiles.ini alone); only the two stylesheets come from here.
-  flake.modules.darwin.base.home-manager.sharedModules = [
-    (
-      { config, ... }:
-      let
-        chrome = "Library/Application Support/librewolf/Profiles/${meta.macLibrewolfProfile}/chrome";
-      in
-      {
-        home.file."${chrome}/userChrome.css".text = userChrome;
-        home.file."${chrome}/userContent.css".text = userContent config.lib.stylix.colors;
-      }
-    )
-  ];
+  # macLibrewolfProfile = null: leave the Mac's LibreWolf alone.
+  flake.modules.darwin.base.home-manager.sharedModules =
+    lib.optional (meta.macLibrewolfProfile or null != null)
+      (
+        { config, ... }:
+        let
+          chrome = "Library/Application Support/librewolf/Profiles/${meta.macLibrewolfProfile}/chrome";
+        in
+        {
+          home.file."${chrome}/userChrome.css".text = userChrome;
+          home.file."${chrome}/userContent.css".text = userContent config.lib.stylix.colors;
+        }
+      );
 }

@@ -2,7 +2,7 @@
 
 use super::super::app::{App, Field, HomeKind, Use, short};
 use super::super::form::{Row, input_row, pad, wrap};
-use super::super::super::plan::Carry;
+use super::super::super::plan::{Carry, GitHubMode, HostPlan};
 use super::super::super::probe;
 use super::super::validate::human_bytes;
 use super::kind_label;
@@ -42,6 +42,31 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         }
     }
     r.push(Row::blank());
+
+    match app.host_plan() {
+        Ok(HostPlan::New(h)) => {
+            let f: Vec<&str> = h.aspects.iter().map(String::as_str).filter(|a| *a != "base").collect();
+            let f = if f.is_empty() { "base only".to_string() } else { f.join(" ") };
+            kv(&mut r, "machine", format!("new: {} (modules/hosts/{}) · {f} · {} graphics", h.name, h.name, h.gpu.name()));
+        }
+        Ok(HostPlan::Existing(n)) => kv(&mut r, "machine", format!("{n}: reinstall (its hardware config stays)")),
+        Err(e) => kv(&mut r, "machine", e),
+    }
+    let g = app.github_plan();
+    let login = g.login.clone().unwrap_or_default();
+    let gh = match &g.mode {
+        GitHubMode::Owner if g.push => format!("{login} (owner) · pushes to {} main", g.upstream),
+        GitHubMode::Owner => format!("{login} (owner) · not pushed: it stays in ~/nixos"),
+        GitHubMode::Fork { url, branch } => {
+            let f = url.trim_start_matches("https://github.com/").trim_end_matches(".git");
+            format!("{login} · your fork {f} · pushes to its {branch} · meta.nix made yours")
+        }
+        GitHubMode::Offline => "offline · committed in ~/nixos only: push later with vx sync".to_string(),
+    };
+    kv(&mut r, "github", gh);
+    if g.mode != GitHubMode::Offline && app.prepared_with.as_ref().is_some_and(|(fetch, _)| !fetch) {
+        kv(&mut r, "", "the repo is the usb's copy (own history): it won't be pushed".into());
+    }
 
     if let Some(d) = app.system_disk() {
         let mut v = format!("{} {}", short(&d.path), d.model);
@@ -94,8 +119,11 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
     }
     let wp = app.data.as_ref().and_then(|d| d.wallpapers.get(app.wallpaper_idx)).map(|w| w.name.clone()).unwrap_or_default();
     let th = app.theme_names().get(app.theme_idx).cloned().unwrap_or_default();
-    kv(&mut r, "settings", format!("{} · {} · {} · {wp} ({th})", app.hostname.value, app.username.value, app.time_zone.value));
-    let repo = if app.prepared_with == Some(true) { "latest from github" } else { "the copy on this usb" };
+    kv(&mut r, "settings", format!("{} · {} · {} · {wp} ({th})", app.host_name(), app.username.value, app.time_zone.value));
+    let repo = match &app.prepared_with {
+        Some((true, origin)) => format!("latest from {}", origin.trim_start_matches("https://").trim_end_matches(".git")),
+        _ => "the copy on this usb".to_string(),
+    };
     let mode = match app.backend.label() {
         "" => String::new(),
         l => format!(" · {l}: nothing is really done"),

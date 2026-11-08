@@ -151,7 +151,7 @@ fn lenient(ctx: &Ctx, sudo: bool, prog: &str, args: &[String]) -> Result<String>
 }
 
 pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
-    ctx.need(Host::Arc)?;
+    ctx.need(Host::NixOs)?;
     let path = resolve(&a.path)?;
     if a.restic {
         return restic(ctx, &path, a.from.as_deref());
