@@ -125,6 +125,7 @@ in
             rsync
             git
             gh # GitHub login (device code), forks and pushes for new machines
+            curl # GitHub device login and SSH keys
             mkpasswd
             openssh
             ssh-to-age
