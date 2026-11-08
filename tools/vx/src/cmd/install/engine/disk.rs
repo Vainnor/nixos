@@ -253,8 +253,75 @@ pub fn safety_checks(plan: &Plan, r: &Runner) -> Result<()> {
     Ok(())
 }
 
+/// Partitions on disks this plan doesn't touch whose names clash with the new
+/// install's (an old NixOS left in the PC): `disk-main-*` / `disk-data-*`.
+/// Returns (disk, partition number, label). `lsblk -nPo PATH,PKNAME,PARTN,PARTLABEL` lines.
+pub fn clashing_partlabels(pairs: &str, targets: &[String]) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    for line in pairs.lines() {
+        let kv = |k: &str| {
+            let tag = format!("{k}=\"");
+            line.find(&tag).map(|i| {
+                let rest = &line[i + tag.len()..];
+                rest[..rest.find('"').unwrap_or(rest.len())].to_string()
+            })
+        };
+        let (Some(pk), Some(n), Some(label)) = (kv("PKNAME"), kv("PARTN"), kv("PARTLABEL")) else { continue };
+        if pk.is_empty() || n.is_empty() || !(label.starts_with("disk-main-") || label.starts_with("disk-data-")) {
+            continue;
+        }
+        let disk = format!("/dev/{pk}");
+        if !targets.contains(&disk) {
+            out.push((disk, n, label));
+        }
+    }
+    out
+}
+
+/// Rename clashing partition names on untouched disks to `old-<name>` (GPT
+/// names only: nothing is erased), so the new install's by-partlabel mounts
+/// can't pick the old disk.
+pub fn rename_clashing_partlabels(r: &Runner, plan: &Plan) -> Result<()> {
+    let mut targets = Vec::new();
+    let mut devs = vec![plan.system.device.clone()];
+    devs.extend(plan.data.iter().filter_map(|d| match &d.mode {
+        DataMode::Format { device, .. } => Some(device.clone()),
+        DataMode::Mount { .. } => None,
+    }));
+    for d in devs {
+        targets.push(resolve(r, &d)?);
+    }
+    let pairs = r.query(Cmd::new("lsblk").args(["-nPo", "PATH,PKNAME,PARTN,PARTLABEL"]).fake(""))?;
+    let clash = clashing_partlabels(&pairs, &targets);
+    for (disk, n, label) in &clash {
+        r.log(format!("renaming partition {n} on {disk} from {label} to old-{label} (it would clash with the new install)"));
+        r.run(Cmd::new("sgdisk").arg(format!("--change-name={n}:old-{label}")).arg(disk))?;
+    }
+    if !clash.is_empty() {
+        let _ = r.run(Cmd::new("udevadm").arg("settle"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finds_old_install_partlabels() {
+        let pairs = r#"PATH="/dev/nvme0n1" PKNAME="" PARTN="" PARTLABEL=""
+PATH="/dev/nvme0n1p1" PKNAME="nvme0n1" PARTN="1" PARTLABEL="disk-main-ESP"
+PATH="/dev/nvme0n1p2" PKNAME="nvme0n1" PARTN="2" PARTLABEL="disk-main-luks"
+PATH="/dev/nvme1n1p1" PKNAME="nvme1n1" PARTN="1" PARTLABEL="disk-main-ESP"
+PATH="/dev/sda1" PKNAME="sda" PARTN="1" PARTLABEL="Basic data partition""#;
+        let c = super::clashing_partlabels(pairs, &["/dev/nvme1n1".to_string()]);
+        assert_eq!(
+            c,
+            vec![
+                ("/dev/nvme0n1".into(), "1".into(), "disk-main-ESP".into()),
+                ("/dev/nvme0n1".into(), "2".into(), "disk-main-luks".into()),
+            ]
+        );
+    }
+
     use super::*;
 
     const LSBLK: &str = r#"{"blockdevices":[{"name":"/dev/nvme0n1","type":"disk","fstype":null,"partlabel":null,"mountpoints":[null],

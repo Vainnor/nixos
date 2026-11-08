@@ -240,6 +240,7 @@ impl<'a> Run<'a> {
     fn disks(&mut self) -> Result<()> {
         let plan = self.plan;
         self.r.mkdir(Path::new(WORK), 0o700)?;
+        disk::rename_clashing_partlabels(&self.r, plan)?;
         if plan.system.encrypt {
             let pw = plan.disk_password.as_ref().context("no disk password")?;
             self.r.write_secret(Path::new(DISK_KEY), pw.0.as_bytes(), 0o600)?;
