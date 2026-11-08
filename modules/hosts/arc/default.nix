@@ -22,7 +22,7 @@ in
   flake.modules.nixos.arc = {
     imports = [
       inputs.disko.nixosModules.disko
-      ./_disko.nix
+      (import ./_disko.nix { inherit inputs user; }) # reads ./disks.json, written by the installer
       ./_hardware.nix
     ];
 
