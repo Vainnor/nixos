@@ -1,0 +1,1257 @@
+//! Installer state: what each screen has collected, background tasks, the
+//! keys, and turning it all into a [`Plan`].
+
+use super::super::plan::{
+    Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, HomePlan, InstallData, Machine, Outcome, Plan, Previous, Secret,
+    Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO,
+};
+use super::super::probe::{self, BackupTarget};
+use super::backend::Backend;
+use super::form::{Input, Row};
+use super::screens;
+use super::theme::Theme;
+use super::validate;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::collections::BTreeSet;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+
+pub const LOG_FILE: &str = "/tmp/vx-install/install.log";
+pub const SWAP_CHOICES: [u32; 5] = [0, 8, 16, 32, 64];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Screen {
+    Welcome,
+    Previous,
+    System,
+    Data,
+    Options,
+    Passwords,
+    Review,
+    Install,
+    Summary,
+    Failed,
+}
+
+pub const STEPS: [&str; 8] = ["welcome", "previous", "system", "data", "options", "passwords", "review", "install"];
+
+impl Screen {
+    pub fn step(self) -> usize {
+        (self as usize).min(7)
+    }
+    pub fn title(self) -> &'static str {
+        match self {
+            Screen::Welcome => "welcome",
+            Screen::Previous => "previous install",
+            Screen::System => "system drive",
+            Screen::Data => "data drives",
+            Screen::Options => "options",
+            Screen::Passwords => "passwords",
+            Screen::Review => "review",
+            Screen::Install => "installing",
+            Screen::Summary => "done",
+            Screen::Failed => "install failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HomeKind {
+    Fresh,
+    Keep,
+    Backup,
+}
+
+/// What a data drive is used for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Use {
+    NotUsed,
+    Format,
+    Mount,
+}
+
+/// Everything the cursor can land on. `usize` in disk fields: index into `App::disks`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    FetchLatest,
+    Start,
+    UnlockPassword,
+    Unlock,
+    SkipPrevious,
+    Carry(Carry),
+    CarryNone,
+    Home(HomeKind),
+    Backup(usize),
+    Rescan,
+    Disk(usize),
+    DataUse(usize),
+    DataName(usize),
+    DataMount(usize),
+    DataEncrypt(usize),
+    DataReadOnly(usize),
+    Encrypt,
+    Tpm,
+    Swap,
+    Hostname,
+    Username,
+    TimeZone,
+    Theme,
+    Wallpaper(usize),
+    DiskPw1,
+    DiskPw2,
+    SameAsDisk,
+    LoginPw1,
+    LoginPw2,
+    ConfirmYes,
+    Install,
+    Next,
+    Reboot,
+    Shell,
+}
+
+impl Field {
+    pub fn is_input(self) -> bool {
+        matches!(
+            self,
+            Field::UnlockPassword
+                | Field::DataName(_)
+                | Field::DataMount(_)
+                | Field::Hostname
+                | Field::Username
+                | Field::TimeZone
+                | Field::DiskPw1
+                | Field::DiskPw2
+                | Field::LoginPw1
+                | Field::LoginPw2
+                | Field::ConfirmYes
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Act {
+    /// enter
+    Select,
+    /// space
+    Toggle,
+    Left,
+    Right,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataRow {
+    pub use_: Use,
+    pub name: Input,
+    pub name_edited: bool,
+    pub mount: Input,
+    pub mount_edited: bool,
+    /// None: same as the system disk.
+    pub encrypt: Option<bool>,
+    pub read_only: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Info,
+    Ok,
+    Warn,
+    Error,
+}
+
+#[derive(Clone, Debug)]
+pub struct Status {
+    pub level: Level,
+    pub text: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WinPurpose {
+    System,
+    Format,
+}
+
+pub enum Modal {
+    /// Type `windows` to allow erasing a Windows disk.
+    Windows { disk: usize, purpose: WinPurpose, input: Input },
+    Quit,
+}
+
+pub enum TaskOut {
+    Probed(Box<Machine>, Result<Vec<DiskInfo>, String>),
+    Prepared(Result<(Box<InstallData>, PathBuf, Option<String>), String>),
+    Unlocked(Result<Box<Unlocked>, String>),
+    Backup(Vec<BackupTarget>),
+}
+
+pub struct Task {
+    pub label: String,
+    pub rx: Receiver<TaskOut>,
+}
+
+pub struct Progress {
+    pub steps: Vec<(String, Option<StepState>)>,
+    pub log: Vec<String>,
+    /// None: follow the end. Some(n): first visible line.
+    pub scroll: Option<usize>,
+    pub rx: Option<Receiver<Event>>,
+    pub done_rx: Option<Receiver<Result<(), String>>>,
+    pub outcome: Option<Outcome>,
+    pub error: Option<String>,
+    pub log_file: Option<std::fs::File>,
+}
+
+impl Progress {
+    pub fn new(steps: Vec<String>) -> Progress {
+        Progress {
+            steps: steps.into_iter().map(|s| (s, None)).collect(),
+            log: vec![],
+            scroll: None,
+            rx: None,
+            done_rx: None,
+            outcome: None,
+            error: None,
+            log_file: None,
+        }
+    }
+    pub fn finished(&self) -> bool {
+        self.outcome.is_some() || self.error.is_some()
+    }
+    fn push_log(&mut self, l: String) {
+        if let Some(f) = &mut self.log_file {
+            let _ = writeln!(f, "{l}");
+        }
+        self.log.push(l);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Exit {
+    Shell,
+    Reboot,
+}
+
+pub struct App {
+    pub backend: Backend,
+    pub offline: bool,
+    pub data_path: Option<PathBuf>,
+    pub repo: Option<PathBuf>,
+    pub ansi: bool,
+    pub theme: Theme,
+    pub screen: Screen,
+    pub focus: Option<Field>,
+    pub status: Option<Status>,
+    pub modal: Option<Modal>,
+    pub task: Option<Task>,
+    pub tick: usize,
+    pub exit: Option<Exit>,
+    /// Write the install log to LOG_FILE (off in tests).
+    pub write_log: bool,
+
+    pub machine: Option<Machine>,
+    pub disks: Vec<DiskInfo>,
+    pub previous: Option<Previous>,
+    pub data: Option<InstallData>,
+    pub work_repo: Option<PathBuf>,
+    pub fetch_latest: bool,
+    /// The fetch setting the repo was prepared with.
+    pub prepared_with: Option<bool>,
+    pub probe_error: Option<String>,
+
+    pub unlock_pw: Input,
+    pub unlock_error: Option<String>,
+    pub unlocked: Option<Unlocked>,
+    pub unlock_secret: Option<Secret>,
+    /// Skipped the previous install: nothing is carried over.
+    pub skipped_previous: bool,
+    pub carry: BTreeSet<Carry>,
+    pub home: HomeKind,
+    pub backup_targets: Option<Vec<BackupTarget>>,
+    pub backup_sel: Option<String>,
+
+    pub system: Option<usize>,
+    pub confirmed_windows: BTreeSet<String>,
+    pub data_rows: Vec<DataRow>,
+
+    pub encrypt: bool,
+    pub tpm: bool,
+    pub swap_gb: u32,
+    pub hostname: Input,
+    pub username: Input,
+    pub time_zone: Input,
+    pub theme_idx: usize,
+    pub wallpaper_idx: usize,
+    pub defaults_set: bool,
+
+    pub disk_pw1: Input,
+    pub disk_pw2: Input,
+    pub login_pw1: Input,
+    pub login_pw2: Input,
+    pub same_as_disk: bool,
+
+    pub confirm: Input,
+    pub progress: Option<Progress>,
+}
+
+/// A panic in a worker thread (the engine): shown as the error instead of tearing the screen down.
+pub static WORKER_PANIC: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+impl App {
+    pub fn new(backend: Backend, offline: bool, data_path: Option<PathBuf>, repo: Option<PathBuf>, ansi: bool) -> App {
+        App {
+            backend,
+            offline,
+            data_path,
+            repo,
+            ansi,
+            theme: if ansi { Theme::ansi() } else { Theme::slate() },
+            screen: Screen::Welcome,
+            focus: None,
+            status: None,
+            modal: None,
+            task: None,
+            tick: 0,
+            exit: None,
+            write_log: true,
+            machine: None,
+            disks: vec![],
+            previous: None,
+            data: None,
+            work_repo: None,
+            fetch_latest: !offline,
+            prepared_with: None,
+            probe_error: None,
+            unlock_pw: Input::secret(),
+            unlock_error: None,
+            unlocked: None,
+            unlock_secret: None,
+            skipped_previous: false,
+            carry: BTreeSet::new(),
+            home: HomeKind::Fresh,
+            backup_targets: None,
+            backup_sel: None,
+            system: None,
+            confirmed_windows: BTreeSet::new(),
+            data_rows: vec![],
+            encrypt: true,
+            tpm: false,
+            swap_gb: 16,
+            hostname: Input::default(),
+            username: Input::default(),
+            time_zone: Input::default(),
+            theme_idx: 0,
+            wallpaper_idx: 0,
+            defaults_set: false,
+            disk_pw1: Input::secret(),
+            disk_pw2: Input::secret(),
+            login_pw1: Input::secret(),
+            login_pw2: Input::secret(),
+            same_as_disk: false,
+            confirm: Input::new(""),
+            progress: None,
+        }
+    }
+
+    /// Probe the machine (on a thread: the online check takes a moment).
+    pub fn start(&mut self) {
+        let b = self.backend;
+        self.spawn("checking this machine", move || {
+            let m = b.machine();
+            TaskOut::Probed(Box::new(m), b.disks().map_err(|e| format!("{e:#}")))
+        });
+    }
+
+    pub fn spawn(&mut self, label: &str, f: impl FnOnce() -> TaskOut + Send + 'static) {
+        let (tx, rx) = mpsc::channel();
+        let _ = std::thread::Builder::new().name("task".into()).spawn(move || {
+            let _ = tx.send(f());
+        });
+        self.task = Some(Task { label: label.into(), rx });
+    }
+
+    pub fn say(&mut self, level: Level, text: impl Into<String>) {
+        self.status = Some(Status { level, text: text.into() });
+    }
+
+    // ------------------------------------------------------------ background work
+
+    /// Called every frame: collect finished tasks and install progress.
+    pub fn poll(&mut self) {
+        self.tick = self.tick.wrapping_add(1);
+        if let Some(t) = &self.task {
+            match t.rx.try_recv() {
+                Ok(out) => {
+                    self.task = None;
+                    self.apply(out);
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.task = None;
+                    let msg = WORKER_PANIC.lock().ok().and_then(|mut p| p.take()).unwrap_or_else(|| "unknown error".into());
+                    self.say(Level::Error, format!("that failed: {msg}"));
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        self.poll_progress();
+    }
+
+    pub fn apply(&mut self, out: TaskOut) {
+        match out {
+            TaskOut::Probed(m, disks) => {
+                self.machine = Some(*m);
+                match disks {
+                    Ok(d) => self.set_disks(d),
+                    Err(e) => self.probe_error = Some(e),
+                }
+            }
+            TaskOut::Prepared(Ok((data, work, warning))) => {
+                self.set_data(*data);
+                self.work_repo = Some(work);
+                self.prepared_with = Some(self.fetch_latest);
+                self.go(if self.previous.is_some() { Screen::Previous } else { Screen::System });
+                if let Some(w) = warning {
+                    self.say(Level::Warn, w);
+                }
+            }
+            TaskOut::Prepared(Err(e)) => self.say(Level::Error, e),
+            TaskOut::Unlocked(Ok(u)) => {
+                self.carry = u.available.clone();
+                self.unlock_secret = u.previous.encrypted.then(|| Secret(self.unlock_pw.value.clone()));
+                self.unlock_pw.clear();
+                self.unlock_error = None;
+                // Reinstalling onto the same disk and keeping /home is the default
+                // when that's where we're installing anyway.
+                self.home = if self.system_disk().map(|d| &d.path) == Some(&u.previous.disk) { HomeKind::Keep } else { HomeKind::Fresh };
+                self.unlocked = Some(*u);
+                self.focus = None;
+                self.say(Level::Ok, "unlocked");
+            }
+            TaskOut::Unlocked(Err(e)) => {
+                self.unlock_error = Some(e);
+                self.unlock_pw.clear();
+                self.focus = Some(Field::UnlockPassword);
+            }
+            TaskOut::Backup(t) => {
+                if self.backup_sel.as_ref().is_some_and(|s| !t.iter().any(|x| &x.partition == s)) {
+                    self.backup_sel = None;
+                }
+                if self.backup_sel.is_none() {
+                    let need = self.unlocked.as_ref().map(|u| u.home_bytes).unwrap_or(0);
+                    self.backup_sel = t.iter().find(|x| x.free.is_none_or(|f| f >= need)).map(|x| x.partition.clone());
+                }
+                self.backup_targets = Some(t);
+            }
+        }
+    }
+
+    pub fn set_disks(&mut self, disks: Vec<DiskInfo>) {
+        self.previous = probe::previous(&disks).into_iter().next();
+        self.data_rows = disks
+            .iter()
+            .map(|d| DataRow {
+                use_: Use::NotUsed,
+                name: Input::default(),
+                name_edited: false,
+                mount: Input::default(),
+                mount_edited: false,
+                encrypt: None,
+                read_only: matches!(d.kind, DiskKind::Windows { system: true, .. }),
+            })
+            .collect();
+        self.system = self
+            .previous
+            .as_ref()
+            .and_then(|p| disks.iter().position(|d| d.path == p.disk))
+            .or_else(|| disks.iter().position(|d| d.kind == DiskKind::Empty));
+        self.disks = disks;
+        if let Some(m) = &self.machine {
+            self.tpm = m.tpm;
+            if m.ram_gb > 0 && m.ram_gb <= 8 {
+                self.swap_gb = 8;
+            }
+            if !m.online {
+                self.fetch_latest = false;
+            }
+        }
+    }
+
+    pub fn set_data(&mut self, data: InstallData) {
+        self.theme = Theme::pick(Some(&data), self.ansi);
+        if !self.defaults_set {
+            let d = &data.defaults;
+            self.hostname = Input::new(&d.hostname);
+            self.username = Input::new(&d.username);
+            self.time_zone = Input::new(&d.time_zone);
+            self.theme_idx = self.theme_names_of(&data).iter().position(|t| *t == d.theme).unwrap_or(0);
+            self.wallpaper_idx = data.wallpapers.iter().position(|w| w.name == d.wallpaper).unwrap_or(0);
+            self.defaults_set = true;
+        }
+        self.data = Some(data);
+    }
+
+    fn theme_names_of(&self, d: &InstallData) -> Vec<String> {
+        std::iter::once("match".to_string()).chain(d.themes.iter().cloned()).collect()
+    }
+
+    pub fn theme_names(&self) -> Vec<String> {
+        self.data.as_ref().map(|d| self.theme_names_of(d)).unwrap_or_else(|| vec!["match".into()])
+    }
+
+    /// Welcome's [ start ]: load install-data, make the work repo, rebuild the data from it.
+    pub fn prepare(&mut self) {
+        if let (Some(_), Some(p)) = (&self.work_repo, self.prepared_with)
+            && p == self.fetch_latest
+        {
+            self.go(if self.previous.is_some() { Screen::Previous } else { Screen::System });
+            return;
+        }
+        let (b, fetch, path, repo) = (self.backend, self.fetch_latest, self.data_path.clone(), self.repo.clone());
+        let label = if fetch { "fetching the latest repo from github" } else { "copying the repo from the usb" };
+        self.spawn(label, move || {
+            let run = || -> Result<_, String> {
+                let initial = b.load_data(path.as_deref(), if path.is_some() { None } else { repo.as_deref() }).map_err(|e| format!("couldn't load the install data: {e:#}"))?;
+                let work = b.prepare_repo(&initial, fetch).map_err(|e| format!("couldn't prepare the repo: {e:#}"))?;
+                if !fetch {
+                    return Ok((Box::new(initial), work, None));
+                }
+                match b.load_data(None, Some(&work)) {
+                    Ok(d) => Ok((Box::new(d), work, None)),
+                    Err(e) => Ok((Box::new(initial), work, Some(format!("using the usb's defaults ({e:#})")))),
+                }
+            };
+            TaskOut::Prepared(run())
+        });
+    }
+
+    pub fn unlock(&mut self) {
+        let Some(prev) = self.previous.clone() else { return };
+        if prev.encrypted && self.unlock_pw.value.is_empty() {
+            self.unlock_error = Some("type the disk password first".into());
+            return;
+        }
+        let b = self.backend;
+        let pw = prev.encrypted.then(|| Secret(self.unlock_pw.value.clone()));
+        self.unlock_error = None;
+        self.spawn(if prev.encrypted { "unlocking" } else { "opening" }, move || {
+            TaskOut::Unlocked(b.unlock(&prev, pw.as_ref()).map(Box::new).map_err(|e| format!("{e:#}")))
+        });
+    }
+
+    pub fn scan_backup(&mut self) {
+        let erased: Vec<String> = self.erased_disks().into_iter().map(|i| self.disks[i].path.clone()).collect();
+        let (b, disks) = (self.backend, self.disks.clone());
+        self.spawn("looking for space to back up to", move || TaskOut::Backup(b.backup_targets(&disks, &erased)));
+    }
+
+    // ------------------------------------------------------------ derived state
+
+    pub fn system_disk(&self) -> Option<&DiskInfo> {
+        self.system.and_then(|i| self.disks.get(i))
+    }
+
+    /// /home is kept: the system disk is the previous install's disk.
+    pub fn keeping(&self) -> bool {
+        self.home == HomeKind::Keep
+            && self.unlocked.as_ref().is_some_and(|u| self.system_disk().is_some_and(|d| d.path == u.previous.disk))
+    }
+
+    pub fn eff_encrypt(&self) -> bool {
+        if self.keeping() { self.unlocked.as_ref().is_some_and(|u| u.previous.encrypted) } else { self.encrypt }
+    }
+
+    pub fn eff_swap(&self) -> u32 {
+        if self.keeping() { self.unlocked.as_ref().map(|u| u.swap_gb).unwrap_or(0) } else { self.swap_gb }
+    }
+
+    pub fn user(&self) -> &str {
+        &self.username.value
+    }
+
+    /// Disks other than the system disk and the installer: candidates for data drives.
+    pub fn data_disks(&self) -> Vec<usize> {
+        (0..self.disks.len()).filter(|&i| Some(i) != self.system && self.disks[i].kind != DiskKind::Installer).collect()
+    }
+
+    /// Indices of disks the plan erases (system disk unless kept, formatted data drives).
+    pub fn erased_disks(&self) -> Vec<usize> {
+        let mut v = vec![];
+        if let Some(s) = self.system
+            && !self.keeping()
+        {
+            v.push(s);
+        }
+        for i in self.data_disks() {
+            if self.data_rows[i].use_ == Use::Format {
+                v.push(i);
+            }
+        }
+        // Before a system disk is picked, the previous install's disk is the likely one.
+        if self.system.is_none()
+            && let Some(p) = &self.previous
+            && let Some(i) = self.disks.iter().position(|d| d.path == p.disk)
+        {
+            v.push(i);
+        }
+        v
+    }
+
+    pub fn is_windows(&self, i: usize) -> bool {
+        matches!(self.disks[i].kind, DiskKind::Windows { .. })
+    }
+
+    /// The old install's password is carried over for this username.
+    pub fn carry_password(&self) -> bool {
+        self.carry.contains(&Carry::Password) && self.unlocked.as_ref().is_some_and(|u| u.users.iter().any(|x| x == self.user()))
+    }
+
+    pub fn need_disk_pw(&self) -> bool {
+        self.eff_encrypt() && !self.keeping()
+    }
+
+    /// The disk password the plan uses: typed, or the unlock password when kept.
+    pub fn disk_secret(&self) -> Option<Secret> {
+        if self.keeping() {
+            return self.unlock_secret.clone().filter(|_| self.eff_encrypt());
+        }
+        self.eff_encrypt().then(|| Secret(self.disk_pw1.value.clone()))
+    }
+
+    pub fn same_as_disk_offered(&self) -> bool {
+        !self.carry_password() && self.eff_encrypt()
+    }
+
+    pub fn default_name(&self, i: usize, use_: Use) -> String {
+        let taken: Vec<String> = self
+            .data_disks()
+            .into_iter()
+            .filter(|&j| j != i && self.data_rows[j].use_ != Use::NotUsed)
+            .map(|j| self.data_rows[j].name.value.clone())
+            .collect();
+        let d = &self.disks[i];
+        let mut wants: Vec<String> = vec![];
+        if use_ == Use::Format {
+            wants.extend(["games", "data", "storage"].map(String::from));
+        } else {
+            if matches!(d.kind, DiskKind::Windows { system: true, .. }) {
+                wants.push("c".into());
+            }
+            if let Some(l) = probe::mountable_partition(d).and_then(|p| p.label.clone()) {
+                let s: String = l.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+                let s = s.trim_matches('-').to_string();
+                if !s.is_empty() && s.len() <= 16 {
+                    wants.push(s);
+                }
+            }
+            wants.extend("defghijk".chars().map(|c| c.to_string()));
+        }
+        wants
+            .into_iter()
+            .chain((2..).map(|n| format!("data-{n}")))
+            .find(|w| !taken.contains(w) && validate::data_name(w).is_ok())
+            .unwrap_or_default()
+    }
+
+    pub fn default_mount(&self, i: usize) -> String {
+        let r = &self.data_rows[i];
+        match r.use_ {
+            Use::Format => format!("/home/{}/{}", self.user(), r.name.value),
+            _ => format!("/mnt/{}", r.name.value),
+        }
+    }
+
+    /// Fill in fields that follow others until edited (data drive mount paths).
+    pub fn sync(&mut self) {
+        for i in 0..self.data_rows.len() {
+            if !self.data_rows[i].mount_edited {
+                let m = self.default_mount(i);
+                self.data_rows[i].mount.value = m;
+            }
+        }
+    }
+
+    pub fn data_encrypt(&self, i: usize) -> bool {
+        self.data_rows[i].encrypt.unwrap_or(self.eff_encrypt())
+    }
+
+    pub fn set_use(&mut self, i: usize, u: Use) {
+        if u == Use::Mount && probe::mountable_partition(&self.disks[i]).is_none() {
+            return;
+        }
+        if u == Use::Format && self.is_windows(i) && !self.confirmed_windows.contains(&self.disks[i].path) {
+            self.modal = Some(Modal::Windows { disk: i, purpose: WinPurpose::Format, input: Input::new("") });
+            return;
+        }
+        self.data_rows[i].use_ = u;
+        if u != Use::NotUsed && !self.data_rows[i].name_edited {
+            let n = self.default_name(i, u);
+            self.data_rows[i].name.value = n;
+        }
+        self.after_disk_change();
+    }
+
+    pub fn select_system(&mut self, i: usize) {
+        if self.disks[i].kind == DiskKind::Installer {
+            self.say(Level::Error, "that's the installer usb: pick another disk");
+            return;
+        }
+        if self.is_windows(i) && !self.confirmed_windows.contains(&self.disks[i].path) {
+            self.modal = Some(Modal::Windows { disk: i, purpose: WinPurpose::System, input: Input::new("") });
+            return;
+        }
+        self.system = Some(i);
+        self.data_rows[i].use_ = Use::NotUsed;
+        self.after_disk_change();
+    }
+
+    /// Keep the /home plan consistent with the disks being erased.
+    fn after_disk_change(&mut self) {
+        if self.home == HomeKind::Keep
+            && let Some(u) = &self.unlocked
+            && self.system_disk().is_some_and(|d| d.path != u.previous.disk)
+        {
+            let disk = u.previous.disk.clone();
+            self.home = HomeKind::Fresh;
+            self.say(Level::Warn, format!("keeping /home only works when installing onto {disk}: /home will be fresh"));
+        }
+        if let Some(sel) = self.backup_sel.clone() {
+            let erased: Vec<String> = self.erased_disks().into_iter().map(|i| self.disks[i].path.clone()).collect();
+            if self.disks.iter().any(|d| erased.contains(&d.path) && d.partitions.iter().any(|p| p.path == sel)) {
+                self.backup_sel = None;
+                self.backup_targets = None;
+                self.say(Level::Warn, format!("{sel} is on a disk that will be erased: pick another backup place"));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ navigation
+
+    pub fn order(&self) -> Vec<Screen> {
+        let mut v = vec![Screen::Welcome];
+        if self.previous.is_some() {
+            v.push(Screen::Previous);
+        }
+        v.extend([Screen::System, Screen::Data, Screen::Options, Screen::Passwords, Screen::Review]);
+        v
+    }
+
+    pub fn go(&mut self, s: Screen) {
+        self.screen = s;
+        self.focus = None;
+        self.status = None;
+        if s == Screen::Review {
+            self.confirm.clear();
+        }
+        self.fix_focus();
+    }
+
+    pub fn back(&mut self) {
+        let o = self.order();
+        if let Some(i) = o.iter().position(|s| *s == self.screen)
+            && i > 0
+        {
+            self.go(o[i - 1]);
+        }
+    }
+
+    /// Validate this screen and move on.
+    pub fn next(&mut self) {
+        if let Err(e) = self.check(self.screen) {
+            self.say(Level::Error, e);
+            return;
+        }
+        if self.screen == Screen::Review {
+            self.start_install();
+            return;
+        }
+        let o = self.order();
+        if let Some(i) = o.iter().position(|s| *s == self.screen)
+            && i + 1 < o.len()
+        {
+            self.go(o[i + 1]);
+            if self.screen == Screen::Previous && self.unlocked.is_none() {
+                self.focus = Some(Field::UnlockPassword);
+            }
+        }
+    }
+
+    pub fn check(&self, s: Screen) -> Result<(), String> {
+        match s {
+            Screen::Welcome => Ok(()),
+            Screen::Previous => self.check_previous(),
+            Screen::System => self.check_system(),
+            Screen::Data => self.check_data(),
+            Screen::Options => self.check_options(),
+            Screen::Passwords => self.check_passwords(),
+            Screen::Review => {
+                for s in self.order() {
+                    if s != Screen::Review {
+                        self.check(s)?;
+                    }
+                }
+                if self.confirm.value != "YES" {
+                    return Err("type YES (in capitals) to install".into());
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn check_previous(&self) -> Result<(), String> {
+        if self.unlocked.is_none() {
+            return if self.previous.is_none() || self.skipped_previous { Ok(()) } else { Err("unlock the old install, or skip it".into()) };
+        }
+        if self.home == HomeKind::Backup {
+            let Some(sel) = &self.backup_sel else { return Err("pick where to back /home up to".into()) };
+            let need = self.unlocked.as_ref().map(|u| u.home_bytes).unwrap_or(0);
+            if let Some(t) = self.backup_targets.iter().flatten().find(|t| &t.partition == sel)
+                && t.free.is_some_and(|f| f < need)
+            {
+                return Err(format!("{sel} is too small for /home: pick another place"));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_system(&self) -> Result<(), String> {
+        let Some(i) = self.system else { return Err("pick the disk to install onto".into()) };
+        let d = &self.disks[i];
+        if d.kind == DiskKind::Installer {
+            return Err("that's the installer usb: pick another disk".into());
+        }
+        if self.is_windows(i) && !self.confirmed_windows.contains(&d.path) {
+            return Err("confirm erasing windows first (enter on the disk)".into());
+        }
+        Ok(())
+    }
+
+    fn check_data(&self) -> Result<(), String> {
+        let mut names = BTreeSet::new();
+        let mut mounts = BTreeSet::new();
+        for i in self.data_disks() {
+            let r = &self.data_rows[i];
+            if r.use_ == Use::NotUsed {
+                continue;
+            }
+            let d = &self.disks[i];
+            validate::data_name(&r.name.value).map_err(|e| format!("{}: {e}", short(&d.path)))?;
+            validate::mount_path(&r.mount.value, self.user()).map_err(|e| format!("{}: {e}", short(&d.path)))?;
+            if !names.insert(r.name.value.clone()) {
+                return Err(format!("two data drives are called {}: rename one", r.name.value));
+            }
+            if !mounts.insert(r.mount.value.clone()) {
+                return Err(format!("two data drives mount at {}: change one", r.mount.value));
+            }
+            if r.use_ == Use::Mount && probe::mountable_partition(d).is_none() {
+                return Err(format!("{}: nothing on it can be mounted", short(&d.path)));
+            }
+            if r.use_ == Use::Format && self.is_windows(i) && !self.confirmed_windows.contains(&d.path) {
+                return Err(format!("{}: confirm erasing windows first", short(&d.path)));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_options(&self) -> Result<(), String> {
+        validate::hostname(&self.hostname.value)?;
+        validate::username(&self.username.value)?;
+        validate::time_zone(&self.time_zone.value, Some(Path::new("/etc/zoneinfo")))?;
+        // Data mount paths under the old username would now be wrong.
+        self.check_data()
+    }
+
+    fn check_passwords(&self) -> Result<(), String> {
+        if self.need_disk_pw() {
+            if self.disk_pw1.value.is_empty() {
+                return Err("type a disk password".into());
+            }
+            if self.disk_pw1.value != self.disk_pw2.value {
+                return Err("the disk passwords don't match".into());
+            }
+        }
+        if !self.carry_password() && !(self.same_as_disk && self.same_as_disk_offered()) {
+            if self.login_pw1.value.is_empty() {
+                return Err("type a login password".into());
+            }
+            if self.login_pw1.value != self.login_pw2.value {
+                return Err("the login passwords don't match".into());
+            }
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ the plan
+
+    pub fn build_plan(&self) -> Result<Plan, String> {
+        for s in [Screen::Previous, Screen::System, Screen::Data, Screen::Options, Screen::Passwords] {
+            self.check(s)?;
+        }
+        let data = self.data.as_ref().ok_or("the install data isn't loaded")?;
+        let sys = self.system_disk().ok_or("pick a system disk")?;
+        let id = |d: &DiskInfo| d.by_id.clone().unwrap_or_else(|| d.path.clone());
+        let keep = self.keeping();
+        let encrypt = self.eff_encrypt();
+        let mut disks = vec![];
+        for i in self.data_disks() {
+            let (r, d) = (&self.data_rows[i], &self.disks[i]);
+            let mode = match r.use_ {
+                Use::NotUsed => continue,
+                Use::Format => {
+                    if self.is_windows(i) && !self.confirmed_windows.contains(&d.path) {
+                        return Err(format!("{}: windows not confirmed", d.path));
+                    }
+                    DataMode::Format { device: id(d), encrypt: self.data_encrypt(i) }
+                }
+                Use::Mount => {
+                    let p = probe::mountable_partition(d).ok_or(format!("{}: nothing to mount", d.path))?;
+                    DataMode::Mount {
+                        uuid: p.uuid.clone().unwrap_or_default(),
+                        fs_type: probe::mount_fs_type(p.fstype.as_deref().unwrap_or("")),
+                        read_only: r.read_only,
+                    }
+                }
+            };
+            disks.push(DataDisk { name: r.name.value.clone(), mount: r.mount.value.clone(), mode });
+        }
+        if self.is_windows(self.system.unwrap_or(0)) && !self.confirmed_windows.contains(&sys.path) {
+            return Err(format!("{}: windows not confirmed", sys.path));
+        }
+        let home = match self.home {
+            _ if self.unlocked.is_none() => HomePlan::Fresh,
+            HomeKind::Fresh => HomePlan::Fresh,
+            HomeKind::Keep if keep => HomePlan::Keep,
+            HomeKind::Keep => HomePlan::Fresh,
+            HomeKind::Backup => {
+                let p = self.backup_sel.clone().ok_or("pick where to back /home up to")?;
+                let erased: Vec<&str> = self.erased_disks().into_iter().map(|i| self.disks[i].path.as_str()).collect();
+                if self.disks.iter().any(|d| erased.contains(&d.path.as_str()) && d.partitions.iter().any(|x| x.path == p)) {
+                    return Err(format!("{p} is on a disk that will be erased: pick another backup place"));
+                }
+                HomePlan::Backup { partition: p }
+            }
+        };
+        let disk_password = self.disk_secret();
+        let user_password = if self.carry_password() {
+            None
+        } else if self.same_as_disk && self.same_as_disk_offered() {
+            disk_password.clone()
+        } else {
+            Some(Secret(self.login_pw1.value.clone()))
+        };
+        let themes = self.theme_names();
+        Ok(Plan {
+            flake: PathBuf::from(WORK_REPO),
+            host: data.host.clone(),
+            system: SystemDisk { device: id(sys), encrypt, tpm: encrypt && self.tpm, swap_gb: self.eff_swap() },
+            data: disks,
+            settings: Settings {
+                hostname: self.hostname.value.clone(),
+                username: self.username.value.clone(),
+                time_zone: self.time_zone.value.clone(),
+                wallpaper: data.wallpapers.get(self.wallpaper_idx).map(|w| w.name.clone()).unwrap_or_else(|| data.defaults.wallpaper.clone()),
+                theme: themes.get(self.theme_idx).cloned().unwrap_or_else(|| "match".into()),
+            },
+            disk_password,
+            user_password,
+            previous: self.unlocked.clone(),
+            carry: if self.unlocked.is_some() { self.carry.clone() } else { BTreeSet::new() },
+            home,
+        })
+    }
+
+    pub fn start_install(&mut self) {
+        let plan = match self.build_plan() {
+            Ok(p) => p,
+            Err(e) => return self.say(Level::Error, e),
+        };
+        let mut p = Progress::new(self.backend.steps(&plan));
+        if self.write_log {
+            let _ = std::fs::create_dir_all(WORK);
+            p.log_file = std::fs::File::create(LOG_FILE).ok();
+        }
+        let (tx, rx) = mpsc::channel();
+        let (dtx, drx) = mpsc::channel();
+        let b = self.backend;
+        let _ = std::thread::Builder::new().name("engine".into()).spawn(move || {
+            let r = b.run(&plan, tx).map_err(|e| format!("{e:#}"));
+            let _ = dtx.send(r);
+        });
+        p.rx = Some(rx);
+        p.done_rx = Some(drx);
+        self.progress = Some(p);
+        self.screen = Screen::Install;
+        self.focus = None;
+        self.status = None;
+    }
+
+    fn poll_progress(&mut self) {
+        let Some(p) = &mut self.progress else { return };
+        let mut events = vec![];
+        if let Some(rx) = &p.rx {
+            while let Ok(e) = rx.try_recv() {
+                events.push(e);
+            }
+        }
+        for e in events {
+            match e {
+                Event::Step { index, state } => {
+                    if let Some(s) = p.steps.get_mut(index) {
+                        s.1 = Some(state);
+                    }
+                }
+                Event::Log(l) => p.push_log(l),
+                Event::Done(o) => p.outcome = Some(o),
+            }
+        }
+        if let Some(drx) = &p.done_rx {
+            match drx.try_recv() {
+                Ok(Ok(())) => {
+                    p.done_rx = None;
+                    if p.outcome.is_none() {
+                        p.outcome = Some(Outcome::default());
+                    }
+                }
+                Ok(Err(e)) => {
+                    p.done_rx = None;
+                    p.push_log(format!("error: {e}"));
+                    p.error = Some(e);
+                }
+                Err(TryRecvError::Disconnected) => {
+                    p.done_rx = None;
+                    let msg = WORKER_PANIC.lock().ok().and_then(|mut x| x.take()).unwrap_or_else(|| "the install stopped unexpectedly".into());
+                    p.push_log(format!("error: {msg}"));
+                    p.error = Some(msg);
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        if self.screen == Screen::Install {
+            if p.error.is_some() {
+                // A step still marked running is where it failed.
+                for s in &mut p.steps {
+                    if s.1 == Some(StepState::Running) {
+                        s.1 = Some(StepState::Failed("failed".into()));
+                    }
+                }
+                self.screen = Screen::Failed;
+                self.focus = None;
+            } else if p.outcome.is_some() && p.done_rx.is_none() {
+                self.screen = Screen::Summary;
+                self.focus = None;
+            }
+        }
+        self.fix_focus();
+    }
+
+    /// Destructive steps are running: quitting would leave the disks half done.
+    pub fn installing(&self) -> bool {
+        self.progress.as_ref().is_some_and(|p| !p.finished())
+    }
+
+    // ------------------------------------------------------------ keys
+
+    pub fn rows(&self, width: u16) -> Vec<Row> {
+        screens::rows(self, width)
+    }
+
+    pub fn focusables(&self) -> Vec<Field> {
+        self.rows(80).into_iter().filter_map(|r| r.field).collect()
+    }
+
+    pub fn fix_focus(&mut self) {
+        let f = self.focusables();
+        if self.focus.is_none_or(|x| !f.contains(&x)) {
+            self.focus = f.first().copied();
+        }
+    }
+
+    fn move_focus(&mut self, d: i32) {
+        let f = self.focusables();
+        if f.is_empty() {
+            return;
+        }
+        let i = self.focus.and_then(|x| f.iter().position(|y| *y == x)).unwrap_or(0) as i32;
+        let j = (i + d).clamp(0, f.len() as i32 - 1) as usize;
+        self.focus = Some(f[j]);
+    }
+
+    pub fn request_quit(&mut self) {
+        if self.installing() {
+            self.say(Level::Warn, "installing: quitting now would leave the disks half done. wait for it to finish");
+            return;
+        }
+        if self.progress.is_some() {
+            self.modal = Some(Modal::Quit);
+        } else {
+            self.exit = Some(Exit::Shell);
+        }
+    }
+
+    pub fn key(&mut self, k: KeyEvent) {
+        if k.kind == KeyEventKind::Release {
+            return;
+        }
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+            return self.request_quit();
+        }
+        if self.modal.is_some() {
+            return self.modal_key(k);
+        }
+        if self.task.is_some() {
+            if k.code == KeyCode::Char('q') {
+                self.request_quit();
+            }
+            return;
+        }
+        if self.screen == Screen::Install {
+            return self.progress_key(k);
+        }
+        let focus = self.focus;
+        let input = focus.is_some_and(Field::is_input);
+        if input && let Some(f) = focus {
+            match k.code {
+                KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.edit(f, |s| s.clear());
+                    return;
+                }
+                KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.edit(f, |s| s.push(c));
+                    return;
+                }
+                KeyCode::Backspace => {
+                    self.edit(f, |s| {
+                        s.pop();
+                    });
+                    return;
+                }
+                KeyCode::Enter => {
+                    // Enter in the last field of a group acts like the button below it.
+                    match f {
+                        Field::UnlockPassword => self.unlock(),
+                        Field::ConfirmYes => self.next(),
+                        _ => self.move_focus(1),
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+        match k.code {
+            KeyCode::Up | KeyCode::BackTab => self.move_focus(-1),
+            KeyCode::Char('k') if !input => self.move_focus(-1),
+            KeyCode::Down | KeyCode::Tab => self.move_focus(1),
+            KeyCode::Char('j') if !input => self.move_focus(1),
+            KeyCode::Esc => {
+                if matches!(self.screen, Screen::Summary | Screen::Failed) {
+                    return;
+                }
+                self.back()
+            }
+            KeyCode::Char('q') if !input => self.request_quit(),
+            KeyCode::Char(' ') => self.act(Act::Toggle),
+            KeyCode::Enter => self.act(Act::Select),
+            KeyCode::Left => self.act(Act::Left),
+            KeyCode::Char('h') if !input => self.act(Act::Left),
+            KeyCode::Right => self.act(Act::Right),
+            KeyCode::Char('l') if !input => self.act(Act::Right),
+            _ => {}
+        }
+        self.sync();
+        self.fix_focus();
+    }
+
+    fn act(&mut self, a: Act) {
+        if let Some(f) = self.focus {
+            screens::act(self, f, a);
+        }
+    }
+
+    fn edit(&mut self, f: Field, op: impl FnOnce(&mut String)) {
+        let input = match f {
+            Field::UnlockPassword => &mut self.unlock_pw,
+            Field::DataName(i) => {
+                self.data_rows[i].name_edited = true;
+                &mut self.data_rows[i].name
+            }
+            Field::DataMount(i) => {
+                self.data_rows[i].mount_edited = true;
+                &mut self.data_rows[i].mount
+            }
+            Field::Hostname => &mut self.hostname,
+            Field::Username => &mut self.username,
+            Field::TimeZone => &mut self.time_zone,
+            Field::DiskPw1 => &mut self.disk_pw1,
+            Field::DiskPw2 => &mut self.disk_pw2,
+            Field::LoginPw1 => &mut self.login_pw1,
+            Field::LoginPw2 => &mut self.login_pw2,
+            Field::ConfirmYes => &mut self.confirm,
+            _ => return,
+        };
+        op(&mut input.value);
+        if matches!(f, Field::Username | Field::DataName(_)) {
+            self.sync();
+        }
+        if self.status.as_ref().is_some_and(|s| s.level == Level::Error) {
+            self.status = None;
+        }
+    }
+
+    fn modal_key(&mut self, k: KeyEvent) {
+        match self.modal.take() {
+            Some(Modal::Quit) => match k.code {
+                KeyCode::Char('y') | KeyCode::Char('q') | KeyCode::Enter => self.exit = Some(Exit::Shell),
+                _ => {}
+            },
+            Some(Modal::Windows { disk, purpose, mut input }) => match k.code {
+                KeyCode::Esc => self.say(Level::Info, "left windows alone"),
+                KeyCode::Enter if input.value == "windows" => {
+                    self.confirmed_windows.insert(self.disks[disk].path.clone());
+                    match purpose {
+                        WinPurpose::System => self.select_system(disk),
+                        WinPurpose::Format => self.set_use(disk, Use::Format),
+                    }
+                    self.sync();
+                }
+                KeyCode::Enter => {
+                    input.clear();
+                    self.modal = Some(Modal::Windows { disk, purpose, input });
+                }
+                KeyCode::Backspace => {
+                    input.value.pop();
+                    self.modal = Some(Modal::Windows { disk, purpose, input });
+                }
+                KeyCode::Char(c) => {
+                    input.value.push(c);
+                    self.modal = Some(Modal::Windows { disk, purpose, input });
+                }
+                _ => self.modal = Some(Modal::Windows { disk, purpose, input }),
+            },
+            None => {}
+        }
+    }
+
+    fn progress_key(&mut self, k: KeyEvent) {
+        let Some(p) = &mut self.progress else { return };
+        let len = p.log.len();
+        let cur = p.scroll.unwrap_or(len.saturating_sub(1));
+        let new = match k.code {
+            KeyCode::Up | KeyCode::Char('k') => Some(cur.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(cur + 1),
+            KeyCode::PageUp => Some(cur.saturating_sub(10)),
+            KeyCode::PageDown => Some(cur + 10),
+            KeyCode::Home | KeyCode::Char('g') => Some(0),
+            KeyCode::End | KeyCode::Char('G') => None,
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.request_quit();
+                return;
+            }
+            _ => return,
+        };
+        // Scrolling to the end follows again.
+        p.scroll = new.filter(|&n| n + 1 < len);
+    }
+}
+
+pub fn short(dev: &str) -> &str {
+    dev.strip_prefix("/dev/").unwrap_or(dev)
+}
