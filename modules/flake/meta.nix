@@ -39,7 +39,7 @@
     #              "dots" (flat dot grid), or a path like ../../assets/some.png
     #   theme:     "match" = the wallpaper's own palette; or "vainnor-slate" /
     #              "caelus" (assets/themes); or any base16 name
-    wallpaper = "eye";
+    wallpaper = "dome";
     theme = "match";
     # Colours laid over the active theme last, for quick experiments, e.g.
     # { base0D = "E0A040"; border = "3A3F3C"; } (see assets/themes/default.nix).
