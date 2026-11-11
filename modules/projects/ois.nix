@@ -33,6 +33,11 @@
           glib-networking
           openssl
         ];
+        # Rootless Docker (dev/containers.nix) listens on the user's socket;
+        # set it here too, so agent sessions that load this shell find it.
+        shellHook = ''
+          export DOCKER_HOST="''${DOCKER_HOST:-unix://''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock}"
+        '';
         # TLS for the webview's network requests.
         GIO_MODULE_DIR = "${pkgs.glib-networking}/lib/gio/modules";
         # Ayatana's tray library is opened at runtime.

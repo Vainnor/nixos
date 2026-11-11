@@ -30,6 +30,11 @@
           libxkbcommon
           valgrind
         ];
+        # Rootless Docker (dev/containers.nix) listens on the user's socket;
+        # set it here too, so agent sessions that load this shell find it.
+        shellHook = ''
+          export DOCKER_HOST="''${DOCKER_HOST:-unix://''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock}"
+        '';
         # Opened with dlopen when the client runs, not linked.
         LD_LIBRARY_PATH = lib.makeLibraryPath (
           with pkgs;
