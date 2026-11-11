@@ -487,6 +487,25 @@ cd ~/code/scraper && uv init && uv add requests && uv run main.py
 Zed picks up each project's language servers from the same shell. For quick one-off scripts
 outside a project, `uv run --python 3.12 script.py` works anywhere.
 
+### The work repos, Claude Code and T3 Code
+
+The PC is the dev machine (no WSL). Clone Mainline, OIS, aviodeck and aviodeck-link into
+`~/Programing` (the commands are in `modules/dev/projects.nix`) and switch: each gets a local
+`.envrc`, kept out of its git through `.git/info/exclude`, that loads its shell. Mainline brings
+its own `flake.nix`; the others' shells live here (`modules/projects/`, `nix develop ~/nixos#ois`),
+so nothing lands in their repos.
+
+Claude Code has two logins, `~/.claude` (Ultra) and `~/.claude-max` (Max); the second shares the
+first's skills, plugins, projects, agents, commands and settings. Log in to each once:
+
+```sh
+claude auth login
+env CLAUDE_CONFIG_DIR=$HOME/.claude-max claude auth login
+```
+
+T3 Code's server (`systemctl --user status t3code`) listens on 3773, open on NetBird only. It
+starts once T3 is installed (`~/.t3/bin/t3`), and both logins show up in it as providers.
+
 ## The Mac
 
 nix-darwin manages the shell (fish, starship, atuin, eza, bat, ...), git with signing, direnv, vis, the Stylix theme, the wallpaper, your Homebrew apps and macOS settings. It leaves Zed's settings, `~/.ssh/config` and your `starship.toml` alone. In LibreWolf it only writes the two stylesheets into your profile (`meta.macLibrewolfProfile`), never `profiles.ini`. Files it takes over (like `~/.config/fish/config.fish`) are kept next to it as `*.hm-backup`.
