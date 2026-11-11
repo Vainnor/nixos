@@ -27,6 +27,10 @@ in
         # peer registers; later the daemon reports the system hostname, which
         # is the same host name (hosts.nix). Nothing here sets a hostname.
         services.netbird.enable = true;
+        # NetBird's own SSH server stays off: it sits in front of OpenSSH
+        # (system/ssh.nix) on port 22, wants a browser login per connection
+        # and can't forward ports. OpenSSH with your key answers instead.
+        services.netbird.clients.default.config.ServerSSHAllowed = false;
         # WireGuard + strict reverse-path filtering don't mix.
         networking.firewall.checkReversePath = "loose";
       }
