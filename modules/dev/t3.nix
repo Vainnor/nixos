@@ -7,8 +7,8 @@
 # rewrites it on each update, so the unit stays T3's. Nix adds a drop-in with
 # what the unit can't know here: the PATH to the user's tools (git, nix, gh,
 # direnv, claude) and the 1Password SSH agent. Its binaries run through nix-ld
-# (dev/tooling.nix). Once T3's unit is there (installed, or imported from WSL
-# by hosts/arc/wsl-import.nix), each switch makes sure it's enabled and running.
+# (dev/tooling.nix). Once T3 has installed its unit, each switch makes sure it's
+# enabled and running.
 { config, ... }:
 let
   inherit (config) meta;
@@ -30,7 +30,7 @@ in
     lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
       home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
         unit=${config.xdg.configHome}/systemd/user/t3code.service
-        if [ -f "$unit" ] && command -v systemctl >/dev/null; then
+        if [ -f "$unit" ]; then
           run ${pkgs.systemd}/bin/systemctl --user daemon-reload || true
           run ${pkgs.systemd}/bin/systemctl --user enable --now t3code.service || true
         fi
