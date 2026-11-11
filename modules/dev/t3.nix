@@ -117,7 +117,9 @@ in
             # firewall opens 3773 on wt0 alone. T3 keeps its other service
             # settings in the same file; the server reads it when it starts.
             env=${serverHome}/service.env
-            before=$(${pkgs.coreutils}/bin/cat "$env" 2>/dev/null || true)
+            settings=${serverHome}/userdata/settings.json
+            state() { ${pkgs.coreutils}/bin/cat "$env" "$settings" 2>/dev/null | ${pkgs.coreutils}/bin/sha256sum; }
+            before=$(state)
             ${pkgs.coreutils}/bin/mkdir -p ${serverHome}
             ${pkgs.coreutils}/bin/touch "$env"
             if ${pkgs.gnugrep}/bin/grep -q '^T3CODE_LAN=' "$env"; then
@@ -125,9 +127,17 @@ in
             else
               echo T3CODE_LAN=true >> "$env"
             fi
+            # Linked environments on (a Labs setting), so the Mac's T3 can link
+            # to this server; the rest of settings.json stays as T3 wrote it.
+            ${pkgs.coreutils}/bin/mkdir -p ${serverHome}/userdata
+            [ -s "$settings" ] || echo '{}' > "$settings"
+            if [ "$(${pkgs.jq}/bin/jq '.linkedEnvironmentsEnabled' "$settings")" != true ]; then
+              ${pkgs.jq}/bin/jq '.linkedEnvironmentsEnabled = true' "$settings" > "$settings.tmp" \
+                && ${pkgs.coreutils}/bin/mv "$settings.tmp" "$settings"
+            fi
             ${pkgs.systemd}/bin/systemctl --user daemon-reload
             ${pkgs.systemd}/bin/systemctl --user enable --now t3code.service
-            if [ "$before" != "$(${pkgs.coreutils}/bin/cat "$env")" ]; then
+            if [ "$before" != "$(state)" ]; then
               ${pkgs.systemd}/bin/systemctl --user restart t3code.service
             fi
           ''}";
