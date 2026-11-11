@@ -7,10 +7,12 @@
 #
 #   2. restic to the homelab (off-site, encrypted, deduplicated), every night.
 #      Target and password come from sops (restic/repository, restic/password,
-#      restic/env); on once meta.resticReady is true. Repository examples:
-#        rest:https://user:pass@restic.homelab.lan/arc   (restic REST server)
-#        sftp:vainnor@nas:/backups/arc                    (any SSH box)
-#        s3:https://minio.homelab.lan/backups/arc         (MinIO; keys in restic/env)
+#      restic/env); on once meta.resticReady is true. The target is the
+#      homelab's rest-server (restic-1, over NetBird only, append-only):
+#      restic/env holds its login (RESTIC_REST_USERNAME/PASSWORD) and
+#      RESTIC_CACERT, pointing at its pinned certificate
+#      (assets/restic/homelab-ca.pem). restic/password is the repository's own
+#      key: keep a copy in 1Password, a reinstall can't restore without it.
 #
 # Not backed up: caches, the Steam library (re-downloadable), VM disk images,
 # Docker data, and ~/Videos (recordings and replays are big; copy keepers off).
@@ -68,17 +70,24 @@ in
           "/home/*/Videos"
           "/persistent/var/lib/libvirt/images"
         ];
-        extraBackupArgs = [ "--exclude-caches" ];
+        extraBackupArgs = [
+          "--exclude-caches"
+          "--retry-lock 30m" # the server's Sunday prune holds the lock
+        ];
         timerConfig = {
           OnCalendar = "03:30";
           Persistent = true; # runs at next boot if the PC was off
           RandomizedDelaySec = "30m";
         };
-        pruneOpts = [
-          "--keep-daily 7"
-          "--keep-weekly 5"
-          "--keep-monthly 12"
-        ];
+        # No forget/prune from here: the homelab's rest-server is append-only
+        # (a compromised PC can't delete its own history) and prunes itself,
+        # Sundays, keeping 7 daily, 4 weekly, 6 monthly (homelab-infra, restic-1).
+        pruneOpts = [ ];
+      };
+
+      # The server's self-signed certificate, pinned (RESTIC_CACERT in restic/env).
+      environment.etc."restic/homelab-ca.pem" = lib.mkIf (meta.secretsReady && meta.resticReady) {
+        source = ../../assets/restic/homelab-ca.pem;
       };
 
       # restic's local index cache (otherwise rebuilt after every reboot).
