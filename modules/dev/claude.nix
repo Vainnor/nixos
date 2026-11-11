@@ -1,12 +1,10 @@
-# Claude Code with two logins, laid out as they were on WSL (and imported from
-# it, hosts/arc/wsl-import.nix): ~/.claude (Claude Max, the default) and
-# ~/.claude-ultra (Claude Ultra). The second dir links skills, plugins,
-# projects, agents, commands and settings.json to ~/.claude, so only the login
-# differs.
+# Claude Code with two logins: ~/.claude (Claude Ultra, the default) and
+# ~/.claude-max (Claude Max). The second dir links skills, plugins, projects,
+# agents, commands and settings.json to ~/.claude, so only the login differs.
 #
-# To log in again, one per dir (fish: use $HOME, `~` after `=` doesn't expand):
+# Logins stay manual, one per dir (fish: use $HOME, `~` after `=` doesn't expand):
 #   claude auth login
-#   env CLAUDE_CONFIG_DIR=$HOME/.claude-ultra claude auth login
+#   env CLAUDE_CONFIG_DIR=$HOME/.claude-max claude auth login
 #
 # T3 Code (dev/t3.nix) gets one provider instance per dir; see providerInstances.
 #
@@ -48,12 +46,8 @@
       home.packages = [ pkgs.claude-code ];
 
       home.file = lib.mkMerge (
-        map (p: {
-          ".claude-ultra/${p}" = {
-            source = link p;
-            force = true; # replaces WSL's own links to the same place
-          };
-        }) (shared ++ [ "settings.json" ])
+        map (p: { ".claude-max/${p}".source = link p; }) shared
+        ++ [ { ".claude-max/settings.json".source = link "settings.json"; } ]
       );
 
       # The link targets must exist, and settings.json stays a plain file that
@@ -83,10 +77,10 @@
         run mkdir -p ${home}/.t3/userdata
         [ -s "$f" ] || echo '{}' > "$f"
         tmp=$(mktemp)
-        ${jq} --arg ultra "${home}/.claude-ultra" '
+        ${jq} --arg max "${home}/.claude-max" '
           .providerInstances = ((.providerInstances // {}) + {
-            "claudeAgent": {"driver": "claudeAgent", "displayName": "Claude Max", "enabled": true, "config": {"enabled": true}},
-            "claudeAgent_ultra": {"driver": "claudeAgent", "displayName": "Claude Ultra", "enabled": true, "config": {"enabled": true, "homePath": $ultra}}
+            "claudeAgent": {"driver": "claudeAgent", "displayName": "Claude Ultra", "enabled": true, "config": {}},
+            "claudeAgent_max": {"driver": "claudeAgent", "displayName": "Claude Max", "enabled": true, "config": {"homePath": $max}}
           })' "$f" > "$tmp" && run mv "$tmp" "$f"
       '';
 

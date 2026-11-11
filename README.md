@@ -489,23 +489,23 @@ outside a project, `uv run --python 3.12 script.py` works anywhere.
 
 ### The work repos, Claude Code and T3 Code
 
-The PC is the dev machine (no WSL). Mainline, OIS, aviodeck and aviodeck-link live in
-`~/Programing` (on arc they came over from WSL: `modules/hosts/arc/wsl-import.nix`). Each gets a
-local `.envrc`, kept out of its git through `.git/info/exclude`, that loads its shell. Mainline
-brings its own `flake.nix`; the others' shells live here (`modules/projects/`,
-`nix develop ~/nixos#ois`), so nothing lands in their repos.
+The PC is the dev machine (no WSL). Mainline, OIS, aviodeck and aviodeck-link come from GitHub:
+after `gh auth login`, each switch clones any that are missing into `~/Programing`
+(`modules/dev/projects.nix`). Each gets a local `.envrc`, kept out of its git through
+`.git/info/exclude`, that loads its shell. Mainline brings its own `flake.nix`; the others'
+shells live here (`modules/projects/`, `nix develop ~/nixos#ois`), so nothing lands in their repos.
 
-Claude Code has two logins, `~/.claude` (Max) and `~/.claude-ultra` (Ultra); the second shares
-the first's skills, plugins, projects, agents, commands and settings. To log in again:
+Claude Code has two logins, `~/.claude` (Ultra) and `~/.claude-max` (Max); the second shares the
+first's skills, plugins, projects, agents, commands and settings. Log in to each once:
 
 ```sh
 claude auth login
-env CLAUDE_CONFIG_DIR=$HOME/.claude-ultra claude auth login
+env CLAUDE_CONFIG_DIR=$HOME/.claude-max claude auth login
 ```
 
 T3 Code's server is open on NetBird only. T3 writes and updates its own `t3code.service`; Nix
-adds a drop-in with your PATH and the 1Password SSH agent, and keeps the service enabled. Both
-logins show up in it as providers.
+adds a drop-in with your PATH and the 1Password SSH agent, and keeps the service enabled once
+it's there. Both logins show up in it as providers.
 
 ## The Mac
 

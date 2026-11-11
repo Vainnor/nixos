@@ -1,17 +1,11 @@
-# The project checkouts and their dev shells. Each one that has been cloned
-# gets a local .envrc (direnv loads the shell on `cd`, and agent sessions get
-# it through dev/claude.nix's hook), listed in .git/info/exclude so it never
-# reaches the repo. An existing .envrc is left alone.
-#
-# On arc they came over from WSL (hosts/arc/wsl-import.nix). Elsewhere, clone
-# them yourself (they need your GitHub login):
-#   gh repo clone Mainline-sim/mainline ~/Programing/Mainline-sim/Mainline -- -b next
-#   gh repo clone VATUSA/OIS ~/Programing/ois -- -b next
-#   gh repo clone aviodeck/aviodeck ~/Programing/aviodeck
-#   gh repo clone aviodeck/aviodeck-link ~/Programing/aviodeck-link
-# then `vx switch` (or `home-manager switch`) writes the .envrc files. direnv
-# trusts exactly these four files (not the folders), so a repo's own .envrc
-# anywhere else still needs `direnv allow`.
+# The work repos, from GitHub, and their dev shells. Each switch clones any
+# that are missing into ~/Programing once you're logged in to GitHub
+# (`gh auth login`; most are private), and gives each a local .envrc (direnv
+# loads the shell on `cd`, and agent sessions get it through dev/claude.nix's
+# hook), listed in .git/info/exclude so it never reaches the repo. An existing
+# checkout or .envrc is left alone. direnv trusts exactly these four .envrc
+# files (not the folders), so a repo's own .envrc elsewhere still needs
+# `direnv allow`.
 { config, ... }:
 let
   inherit (config) meta;
@@ -26,20 +20,45 @@ in
     }:
     let
       home = config.home.homeDirectory;
-      # Folder (under ~/Programing) = what its .envrc says.
+      # Folder (under ~/Programing) = its GitHub repo, branch and .envrc.
       projects = {
         # Mainline carries its own flake.nix (on its chore/nix-dev-shell branch
         # until merged); until then the .envrc does nothing.
-        "Mainline-sim/Mainline" = "if [ -f flake.nix ]; then use flake; fi";
-        "ois" = "use flake ${meta.flakePath}#ois";
-        "aviodeck" = "use flake ${meta.flakePath}#aviodeck";
-        "aviodeck-link" = "use flake ${meta.flakePath}#aviodeck-link";
+        "Mainline-sim/Mainline" = {
+          repo = "Mainline-sim/mainline";
+          branch = "next";
+          envrc = "if [ -f flake.nix ]; then use flake; fi";
+        };
+        "OIS" = {
+          repo = "VATUSA/OIS";
+          branch = "next";
+          envrc = "use flake ${meta.flakePath}#ois";
+        };
+        "aviodeck" = {
+          repo = "aviodeck/aviodeck";
+          branch = "main";
+          envrc = "use flake ${meta.flakePath}#aviodeck";
+        };
+        "aviodeck-link" = {
+          repo = "aviodeck/aviodeck-link";
+          branch = "main";
+          envrc = "use flake ${meta.flakePath}#aviodeck-link";
+        };
       };
-      write = dir: envrc: ''
+      gh = lib.getExe pkgs.gh;
+      write = dir: p: ''
         d=${home}/Programing/${dir}
+        if [ ! -e "$d" ]; then
+          if ${gh} auth status >/dev/null 2>&1; then
+            run mkdir -p "$(dirname "$d")"
+            run env PATH="${pkgs.git}/bin:$PATH" ${gh} repo clone ${p.repo} "$d" -- -b ${p.branch} || echo "could not clone ${p.repo}" >&2
+          else
+            echo "${dir}: not cloned yet; run gh auth login, then vx switch" >&2
+          fi
+        fi
         if [ -d "$d/.git" ]; then
           if [ ! -e "$d/.envrc" ]; then
-            run sh -c 'printf "%s\n" "$1" > "$2"' sh ${lib.escapeShellArg envrc} "$d/.envrc"
+            run sh -c 'printf "%s\n" "$1" > "$2"' sh ${lib.escapeShellArg p.envrc} "$d/.envrc"
           fi
           x="$d/.git/info/exclude"
           run mkdir -p "$d/.git/info"
@@ -54,7 +73,7 @@ in
         dir: _: "${home}/Programing/${dir}/.envrc"
       ) projects;
 
-      home.activation.projectEnvrc = lib.hm.dag.entryAfter [ "writeBoundary" ] (
+      home.activation.projects = lib.hm.dag.entryAfter [ "writeBoundary" ] (
         lib.concatStrings (lib.mapAttrsToList write projects)
       );
     };
