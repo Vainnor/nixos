@@ -14,6 +14,14 @@
 #      (assets/restic/homelab-ca.pem). restic/password is the repository's own
 #      key: keep a copy in 1Password, a reinstall can't restore without it.
 #
+#      Reinstalling: the installer can restore /home/<user> from the latest
+#      snapshot before the first boot ("restore /home from the homelab
+#      backup", fresh /home only). Its login comes from restic/* when the
+#      carried host key decrypts them, else from the 1Password item
+#      meta.restoreItem (default "op://Private/arc restic"; fields repository,
+#      password, rest_username, rest_password: the same values), else typed.
+#      Later, on the system: `vx restore --restic <path>`.
+#
 # Not backed up: caches, the Steam library (re-downloadable), VM disk images,
 # Docker data, and ~/Videos (recordings and replays are big; copy keepers off).
 { config, ... }:

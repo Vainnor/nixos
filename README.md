@@ -134,9 +134,18 @@ The screens:
 - **options**: encryption, TPM auto-unlock, swap file size (zram is always on), hostname, username, time
   zone, theme and wallpaper.
 - **passwords**: the disk passphrase and your login password (or the carried-over one).
+- **restore**: with a fresh `/home`, put `/home/<you>` back from the latest homelab backup (restic), so
+  you come back signed in to everything: files, browser sessions, `gh`, Claude and the rest. The backup's
+  login comes from the secrets when the host key is carried over, else from your 1Password item
+  (`meta.restoreItem`: sign in with your email, secret key and password), else you type it. The server
+  is only reachable over NetBird, so the USB logs in to it first (with a carried-over login it joins as
+  `<name>-usb`; remove that peer afterwards). The screen looks the backup up before anything is erased;
+  if it can't be reached, skip it and run `vx restore --restic` later.
 - **review**: everything you picked, with what will be **erased** in red. Type `YES`.
 - **progress**: each step with a live log (with Setup Mode: your Secure Boot keys are made and enrolled,
-  plus Microsoft's, and the boot files signed), then a summary with what to do next, and reboot or a shell.
+  plus Microsoft's, and the boot files signed; with a restore: GB and files restored), then a summary with
+  what to do next, and reboot or a shell. A restore that stops is retried and picks up where it was; if
+  it still can't finish, the install goes on and the summary says how to restore later.
 
 **Carry-over** copies state from the previous install's `/persistent`, so the new system starts where the
 old one left off. Each item can be left out:
@@ -288,6 +297,7 @@ Open **CoolerControl** from the launcher. Pick a fan, make a curve against a tem
 
 - **Snapshots** (already on): `@home` and `@persistent` every hour, kept 48 h / 14 days / 6 weeks. `vx snapshots` lists them, `vx snapshot` takes one now (before something risky), and `vx restore <path>` brings a file back from one; old files are under `/.btrfs/@snapshots/`. They live on the same disk, so they protect against mistakes, not against a dead drive.
 - **restic to the homelab**: put the repository URL, a password and (for S3/MinIO) keys in `restic/*` with `vx secrets edit`, then set `meta.resticReady = true` and deploy. It runs nightly at 03:30 (or at the next boot if the PC was off). `vx backup` runs it now, and `vx restore --restic <path>` gets files back from it into `/tmp/restore` (plain `vx restore <path>` picks a version from the local snapshots).
+- **Reinstalling from it**: the installer can restore your whole `/home` before the first boot (the **restore** screen, see Install). For a new disk, where the secrets can't be read yet, keep the same login in 1Password: one item (`meta.restoreItem`, default `op://Private/arc restic`) with the fields `repository`, `password`, `rest_username` and `rest_password`. Then a reinstall needs nothing but your 1Password account.
 
 </details>
 
