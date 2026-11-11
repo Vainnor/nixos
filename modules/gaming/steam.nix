@@ -12,8 +12,12 @@
 
       programs.steam = {
         enable = true;
-        remotePlay.openFirewall = true;
-        localNetworkGameTransfers.openFirewall = true;
+        # Remote Play and LAN game transfers: their ports are opened below on
+        # NetBird only, not on the LAN or Wi-Fi (shared networks). Over NetBird
+        # Remote Play has no LAN discovery, so Steam connects through your
+        # account; Moonlight (gaming/sunshine.nix) is the main remote screen.
+        remotePlay.openFirewall = false;
+        localNetworkGameTransfers.openFirewall = false;
         extraCompatPackages = [ pkgs.proton-ge-bin ];
       };
       programs.gamescope = {
@@ -21,6 +25,19 @@
         capSysNice = true;
       };
       programs.gamemode.enable = true;
+
+      networking.firewall.interfaces.wt0 = {
+        allowedTCPPorts = [
+          27036 # Remote Play
+          27040 # LAN game transfers
+        ];
+        allowedUDPPortRanges = [
+          {
+            from = 27031;
+            to = 27036;
+          }
+        ];
+      };
     };
 
   flake.modules.homeManager.gaming = {
