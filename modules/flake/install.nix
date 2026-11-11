@@ -7,9 +7,11 @@
 # the machine (reinstall an existing host, or a new one that gets its own
 # modules/hosts/<name>/ with host.json, _hardware.nix and disks.json; see
 # flake/hosts.nix), the system drive and data drives, carries state over from
-# a previous install, writes the host folder and the meta edits into its repo
-# copy, runs disko (hosts/_disko.nix) and nixos-install, then commits and
-# pushes (to your fork unless you are the owner).
+# a previous install, can restore /home from the homelab backup (restic; its
+# login from the secrets, the 1Password item meta.restoreItem, or typed),
+# writes the host folder and the meta edits into its repo copy, runs disko
+# (hosts/_disko.nix) and nixos-install, then commits and pushes (to your fork
+# unless you are the owner).
 #
 #   packages.<system>.install-data  defaults and choices for the screens (JSON;
 #                                   builds on the Mac too, for `vx install --demo`)
@@ -52,6 +54,8 @@ let
   installData = {
     inherit host themes;
     inherit (meta) repoUrl githubUser;
+    # The 1Password item with the home backup's login (null: not offered).
+    restoreItem = meta.restoreItem or null;
     # The upstream repo on GitHub, from repoUrl.
     owner = repoPart 1;
     repo = repoPart 2;

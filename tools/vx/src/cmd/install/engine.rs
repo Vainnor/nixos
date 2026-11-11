@@ -9,6 +9,7 @@
 //! - `settings` meta.nix / host.json / disks.json edits
 //! - `github`   logging in, the user's fork, their keys
 //! - `netbird`  logging in to NetBird on the installer
+//! - `restic`   restoring /home from the homelab backup, and its login
 //! - `wifi`     scanning for and connecting to Wi-Fi on the installer
 //! - `steps`    the install steps
 //! - `finish`   the summary's next steps
@@ -18,12 +19,13 @@ mod finish;
 pub mod github;
 pub mod netbird;
 mod previous;
+pub mod restic;
 mod runner;
 pub mod settings;
 mod steps;
 pub mod wifi;
 
-use super::plan::{Event, InstallData, Plan, Previous, Secret, StepState, Unlocked, WORK, WORK_REPO};
+use super::plan::{Event, InstallData, Plan, Previous, ResticCreds, Secret, StepState, Unlocked, WORK, WORK_REPO};
 use anyhow::{Context, Result, bail};
 use runner::{Cmd, Runner};
 use std::path::{Path, PathBuf};
@@ -165,6 +167,21 @@ pub fn wifi_connect(n: &wifi::Network, password: Option<&Secret>, mode: Mode) ->
     })
 }
 
+/// The restic login from secrets.yaml, read with the carried host `key`.
+pub fn restic_from_sops(repo: &Path, key: &Path, mode: Mode) -> (Result<ResticCreds>, Vec<String>) {
+    logged(mode, |r| restic::from_sops(r, repo, key))
+}
+
+/// The restic login from the 1Password `item`, after signing in.
+pub fn restic_from_op(login: &restic::OpLogin, item: &str, mode: Mode) -> (Result<ResticCreds>, Vec<String>) {
+    logged(mode, |r| restic::from_op(r, login, item))
+}
+
+/// Can the backup be read with this login? Its latest snapshot.
+pub fn restic_check(creds: &ResticCreds, repo: &Path, mode: Mode) -> (Result<String>, Vec<String>) {
+    logged(mode, |r| restic::check(r, creds, repo))
+}
+
 /// Stop a waiting `netbird up` (leaving the screen, quitting).
 pub fn nb_stop() {
     netbird::stop();
@@ -227,6 +244,8 @@ pub(crate) mod tests {
 
     const DISK_PW: &str = "disk-pass-Zq9";
     const USER_PW: &str = "login-pass-Xk3";
+    const RESTIC_PW: &str = "repo-pass-Wm4";
+    const REST_PW: &str = "rest-pass-Jn8";
 
     pub fn owner_github() -> GitHubPlan {
         GitHubPlan {
@@ -293,6 +312,15 @@ pub(crate) mod tests {
             home: HomePlan::Fresh,
             setup_mode: false,
             netbird: false,
+            restore: None,
+        }
+    }
+
+    pub fn home_restore() -> HomeRestore {
+        HomeRestore {
+            creds: restic::typed("rest:https://restic-1.example:8000/arc/", RESTIC_PW, "arc", REST_PW).unwrap(),
+            source: CredSource::OnePassword,
+            latest: "2026-11-09 03:41 from arc".into(),
         }
     }
 
@@ -387,6 +415,74 @@ pub(crate) mod tests {
         assert!(n.contains(&"set up passwords and keys".to_string()));
     }
 
+    #[test]
+    fn home_restore_only_onto_a_fresh_home() {
+        let at = |n: &[String], s: &str| n.iter().position(|x| x == s);
+        let mut p = plan_fresh();
+        assert!(at(&names(&p), "restore /home from the homelab").is_none(), "not chosen");
+        p.restore = Some(home_restore());
+        p.host = new_host();
+        let n = names(&p);
+        let i = at(&n, "restore /home from the homelab").unwrap();
+        // After the disks are mounted (and the hardware read), before restore takes the usb off netbird.
+        assert!(at(&n, "detect the hardware").unwrap() < i);
+        assert_eq!(n[i + 1], "set up passwords and keys");
+        assert!(i < at(&n, "install the system").unwrap());
+        // Backup then fresh: offered too. Keep: never, whatever the plan says.
+        let mut b = plan_keep();
+        b.restore = Some(home_restore());
+        assert!(at(&names(&b), "restore /home from the homelab").is_none());
+        b.home = HomePlan::Backup { partition: "/dev/sdb2".into() };
+        assert!(at(&names(&b), "restore /home from the homelab").is_some());
+        assert!(restore_offered(&HomePlan::Fresh) && !restore_offered(&HomePlan::Keep));
+    }
+
+    #[test]
+    fn dry_run_home_restore() {
+        let mut plan = plan_fresh();
+        plan.netbird = true;
+        plan.restore = Some(home_restore());
+        let (logs, events, res) = dry(&plan);
+        res.unwrap();
+        no_secrets(&logs);
+        let c = cmds(&logs);
+        assert_order(
+            &c,
+            &[
+                "/nix/store/00000000000000000000000000000000-disko",
+                "restic --repository-file /run/vx-install/restic/repository --password-file /run/vx-install/restic/password \
+                 --cacert /nonexistent/vx-install/nixos/assets/restic/homelab-ca.pem --json restore latest --target /mnt \
+                 --include /home/vainnor --overwrite if-changed",
+                // Then the usb leaves netbird, and its login goes into the new system.
+                "netbird down",
+                "nixos-install",
+                "nixos-enter --root /mnt -c '{ [ \"$(id -u vainnor)\" = 1000 ] || chown -hR --from=1000 vainnor /home/vainnor; } && \
+                 { [ \"$(id -g vainnor)\" = 100 ] || chown -hR --from=:100 :users /home/vainnor; } && chown -R vainnor:users /home/vainnor/nixos",
+            ],
+        );
+        assert_order(
+            &logs.iter().map(|l| l.to_string()).collect::<Vec<_>>(),
+            &["write /run/vx-install/restic/repository (secret, 600)", "write /run/vx-install/restic/password (secret, 600)", "$ restic ", "remove /run/vx-install/restic"],
+        );
+        // The restored home had a ~/nixos: moved aside, not refused.
+        assert!(logs.iter().any(|l| l.starts_with("move /mnt/home/vainnor/nixos -> /mnt/home/vainnor/nixos.before-reinstall-")));
+        let Some(Event::Done(o)) = events.last() else { panic!("no Done") };
+        assert_eq!(o.home_restored.as_deref(), Some("2026-11-09 03:41 from arc"));
+        assert!(o.restore_failed.is_none() && o.next_steps.len() == 2);
+        // Not chosen: no restic, ~/nixos isn't expected to be there.
+        let c = cmds(&dry(&plan_fresh()).0);
+        assert!(!c.iter().any(|c| c.starts_with("restic") || c.contains("--from=")));
+    }
+
+    #[test]
+    fn restore_secrets_are_cleaned_up_after_a_failure() {
+        let (_, logs) = logged(Mode::DryRun, |r| {
+            steps::after_failure(r);
+            Ok(())
+        });
+        assert!(logs.contains(&"remove /run/vx-install/restic".to_string()) && logs.contains(&"remove /run/vx-install/op".to_string()));
+    }
+
     /// Run in DryRun, return the log lines and the events.
     fn dry(plan: &Plan) -> (Vec<String>, Vec<Event>, Result<()>) {
         let (tx, rx) = mpsc::channel();
@@ -417,7 +513,10 @@ pub(crate) mod tests {
 
     fn no_secrets(logs: &[String]) {
         for l in logs {
-            assert!(!l.contains(DISK_PW) && !l.contains(USER_PW) && !l.contains("gho_"), "secret in log: {l}");
+            assert!(
+                !l.contains(DISK_PW) && !l.contains(USER_PW) && !l.contains(RESTIC_PW) && !l.contains(REST_PW) && !l.contains("gho_"),
+                "secret in log: {l}"
+            );
         }
     }
 
@@ -827,6 +926,7 @@ pub(crate) mod tests {
             hosts: vec![],
             aspects: vec![],
             state_version: "26.11".into(),
+            restore_item: None,
         }
     }
 

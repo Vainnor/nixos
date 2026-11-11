@@ -2,8 +2,10 @@
 //! [`Mode::DryRun`] it only logs what it would do and hands back the canned
 //! output the caller set with [`Cmd::fake`].
 //!
-//! Secrets never go in argv or in the log: they go in through stdin
-//! ([`Cmd::stdin`]) or through files written with [`Runner::write_secret`].
+//! Secrets never go in the log, and only in argv when a program takes them no
+//! other way ([`Cmd::secret_arg`], shown as `***`): they go in through stdin
+//! ([`Cmd::stdin`]), the environment ([`Cmd::env`], never logged) or files
+//! written with [`Runner::write_secret`].
 
 use super::super::plan::Event;
 use super::Mode;
@@ -33,6 +35,11 @@ pub struct Cmd {
     fake: String,
     /// Don't forward stdout to the log (still returned), e.g. a password hash.
     quiet: bool,
+    /// Indexes into `args` shown as `***` in the log.
+    hidden: Vec<usize>,
+    /// Turns each stdout line into the log line (None: not logged), e.g.
+    /// restic's JSON progress into "restored 3.1 of 80 GB".
+    format: Option<fn(&str) -> Option<String>>,
 }
 
 impl Cmd {
@@ -51,6 +58,19 @@ impl Cmd {
         S: AsRef<str>,
     {
         self.args.extend(it.into_iter().map(|s| s.as_ref().to_string()));
+        self
+    }
+
+    /// An argument that is a secret: in argv (the program takes it no other
+    /// way), `***` in the log.
+    pub fn secret_arg(mut self, a: impl AsRef<str>) -> Self {
+        self.hidden.push(self.args.len());
+        self.args.push(a.as_ref().to_string());
+        self
+    }
+
+    pub fn format(mut self, f: fn(&str) -> Option<String>) -> Self {
+        self.format = Some(f);
         self
     }
 
@@ -77,9 +97,9 @@ impl Cmd {
     /// `prog arg ...`, quoted like a shell would need. What the log shows after "$ ".
     pub fn line(&self) -> String {
         let mut s = shell_quote(&self.prog);
-        for a in &self.args {
+        for (i, a) in self.args.iter().enumerate() {
             s.push(' ');
-            s.push_str(&shell_quote(a));
+            s.push_str(&if self.hidden.contains(&i) { "***".to_string() } else { shell_quote(a) });
         }
         if self.stdin.is_some() {
             s.push_str(" < (stdin)");
@@ -204,7 +224,19 @@ impl Runner {
         let mut tail: VecDeque<String> = VecDeque::new();
         let mut last_progress: Option<Instant> = None;
         for (is_out, line, progress) in lrx {
-            if is_out {
+            let (line, progress) = match c.format {
+                Some(f) if is_out => {
+                    stdout.push_str(&line);
+                    stdout.push('\n');
+                    match f(&line) {
+                        // Not rate-limited here: the program paces itself, and the last line counts.
+                        Some(l) => (l, false),
+                        None => continue,
+                    }
+                }
+                _ => (line, progress),
+            };
+            if is_out && c.format.is_none() {
                 if !progress {
                     stdout.push_str(&line);
                     stdout.push('\n');
@@ -395,6 +427,21 @@ mod tests {
         let c = Cmd::new("cryptsetup").args(["open", "--key-file", "-"]).stdin("hunter2");
         assert_eq!(c.line(), "cryptsetup open --key-file - < (stdin)");
         assert!(!c.line().contains("hunter2"));
+    }
+
+    #[test]
+    fn secret_args_and_formatted_lines() {
+        let c = Cmd::new("op").args(["account", "add", "--secret-key"]).secret_arg("A3-SECRET").arg("--raw");
+        assert_eq!(c.line(), "op account add --secret-key *** --raw");
+        assert_eq!(c.args[3], "A3-SECRET");
+        let (tx, rx) = mpsc::channel();
+        let r = Runner::new(Mode::Real, Some(tx));
+        let f: fn(&str) -> Option<String> = |l| l.strip_prefix("n=").map(|n| format!("got {n}"));
+        let out = r.run(Cmd::new("/bin/sh").args(["-c", "echo n=1; echo noise; echo n=2"]).format(f)).unwrap();
+        assert_eq!(out, "n=1\nnoise\nn=2\n", "stdout is returned as it was");
+        drop(r);
+        let logs: Vec<String> = rx.iter().filter_map(|e| if let Event::Log(s) = e { Some(s) } else { None }).collect();
+        assert_eq!(logs[1..], ["got 1", "got 2"]);
     }
 
     #[test]

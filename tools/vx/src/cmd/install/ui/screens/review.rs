@@ -117,6 +117,9 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         };
         kv(&mut r, "/home", home);
     }
+    if let Some(h) = app.home_restore() {
+        kv(&mut r, "home backup", format!("/home/{} restored from {} (login from {})", app.user(), h.latest, h.source.label()));
+    }
     let wp = app.data.as_ref().and_then(|d| d.wallpapers.get(app.wallpaper_idx)).map(|w| w.name.clone()).unwrap_or_default();
     let th = app.theme_names().get(app.theme_idx).cloned().unwrap_or_default();
     kv(&mut r, "settings", format!("{} · {} · {} · {wp} ({th})", app.host_name(), app.username.value, app.time_zone.value));

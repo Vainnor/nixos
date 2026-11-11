@@ -4,9 +4,10 @@
 
 use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::engine::netbird;
+use super::super::engine::restic::OpLogin;
 use super::super::engine::wifi::Network;
 use super::super::engine::{self, Mode};
-use super::super::plan::{DiskInfo, Event, InstallData, Machine, Plan, Previous, Secret, Unlocked};
+use super::super::plan::{DiskInfo, Event, InstallData, Machine, Plan, Previous, ResticCreds, Secret, Unlocked};
 use super::super::probe::{self, BackupTarget};
 use super::demo;
 use anyhow::Result;
@@ -123,6 +124,29 @@ impl Backend {
             demo::pause(1500);
         }
         engine::wifi_connect(n, password, self.mode())
+    }
+
+    // The home backup: the demo and --dry-run pretend (a made-up login and snapshot).
+
+    pub fn restic_sops(self, repo: &Path, key: &Path) -> (Result<ResticCreds>, Vec<String>) {
+        if self.is_demo() {
+            demo::pause(800);
+        }
+        engine::restic_from_sops(repo, key, self.mode())
+    }
+
+    pub fn restic_op(self, login: &OpLogin, item: &str) -> (Result<ResticCreds>, Vec<String>) {
+        if self.is_demo() {
+            demo::pause(1500);
+        }
+        engine::restic_from_op(login, item, self.mode())
+    }
+
+    pub fn restic_check(self, creds: &ResticCreds, repo: &Path) -> (Result<String>, Vec<String>) {
+        if self.is_demo() {
+            demo::pause(1200);
+        }
+        engine::restic_check(creds, repo, self.mode())
     }
 
     pub fn unlock(self, prev: &Previous, password: Option<&Secret>) -> Result<Unlocked> {

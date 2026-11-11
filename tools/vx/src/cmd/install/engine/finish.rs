@@ -27,12 +27,16 @@ pub struct NextInput {
     pub tpm: bool,
     /// Secrets are on and this new host waits for another machine to re-encrypt them.
     pub secrets_pending: bool,
+    /// The home restore was chosen but didn't finish: why.
+    pub restore_failed: Option<String>,
+    /// The username (for the restore's next step).
+    pub user: String,
 }
 
-/// Only what needs a person: the usb and reboot, Secure Boot in the BIOS, and
-/// (as a note) the secrets that arrive by themselves. GitHub, NetBird and the
-/// push are done by the installer; a push that didn't happen is in
-/// [`not_pushed`].
+/// Only what needs a person: the usb and reboot, Secure Boot in the BIOS, a
+/// home restore that didn't finish, and (as a note) the secrets that arrive by
+/// themselves. GitHub, NetBird and the push are done by the installer; a push
+/// that didn't happen is in [`not_pushed`].
 pub fn next_steps(i: &NextInput) -> Vec<String> {
     let mut v = vec!["remove the usb stick and reboot into nixos".to_string()];
     let tpm = if i.tpm { "; the disk then unlocks itself" } else { "" };
@@ -44,6 +48,13 @@ pub fn next_steps(i: &NextInput) -> Vec<String> {
         v.push(format!(
             "secure boot: boot nixos once, then in the bios set secure boot to setup mode (delete keys) and boot again: \
              it enrolls your keys; then turn secure boot on{tpm}"
+        ));
+    }
+    if let Some(why) = &i.restore_failed {
+        v.push(format!(
+            "/home wasn't restored from the homelab ({why}): on the new system, vx restore --restic /home/{} \
+             puts the backup in /tmp/restore",
+            i.user
         ));
     }
     if i.secrets_pending {
@@ -122,6 +133,15 @@ mod tests {
         );
         let all = v.join(" ");
         assert!(!all.contains("netbird") && !all.contains("gh auth") && !all.contains("add-host") && !all.contains("push"));
+    }
+
+    #[test]
+    fn restore_left_for_later() {
+        let v = next_steps(&NextInput { restore_failed: Some("can't reach the backup server".into()), user: "vainnor".into(), ..Default::default() });
+        assert_eq!(v.len(), 3);
+        assert!(v[2].starts_with("/home wasn't restored from the homelab (can't reach the backup server)"), "{}", v[2]);
+        assert!(v[2].contains("vx restore --restic /home/vainnor"));
+        assert_eq!(next_steps(&NextInput::default()).len(), 2, "restored, or not chosen: nothing said");
     }
 
     #[test]

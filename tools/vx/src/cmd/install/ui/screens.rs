@@ -7,6 +7,7 @@ mod netbird;
 mod options;
 mod previous;
 mod progress;
+mod restore;
 mod review;
 mod welcome;
 mod wifi;
@@ -31,6 +32,7 @@ pub fn rows(app: &App, width: u16) -> Vec<Row> {
         Screen::Data => disks::data_rows(app, w),
         Screen::Options => options::rows(app, w),
         Screen::Passwords => options::password_rows(app, w),
+        Screen::Restore => restore::rows(app, w),
         Screen::Review => review::rows(app, w),
         Screen::Install => vec![],
         Screen::Summary => progress::summary_rows(app, w),
@@ -59,6 +61,9 @@ pub fn act(app: &mut App, f: Field, a: Act) {
         }
         Field::Disk(_) | Field::DataUse(_) | Field::DataEncrypt(_) | Field::DataReadOnly(_) => disks::act(app, f, a),
         Field::Encrypt | Field::Tpm | Field::Swap | Field::Theme | Field::Wallpaper(_) | Field::SameAsDisk => options::act(app, f, a),
+        Field::RsRestore | Field::RsNetbird | Field::RsNo | Field::RsSignIn | Field::RsType | Field::RsCheck | Field::RsRetry => {
+            restore::act(app, f, a)
+        }
         Field::Install => {
             if a == Act::Select || a == Act::Toggle {
                 app.next();

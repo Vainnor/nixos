@@ -151,6 +151,55 @@ pub enum HomePlan {
     Backup { partition: String },
 }
 
+/// Restore /home from the homelab's restic backup, onto a /home that is made
+/// fresh (never with [`HomePlan::Keep`]: that /home is already there).
+pub fn restore_offered(home: &HomePlan) -> bool {
+    *home != HomePlan::Keep
+}
+
+/// Where the restic login came from, in the order they're tried
+/// (engine::restic::sources).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CredSource {
+    /// secrets.yaml (restic/*), decrypted with the carried-over host key.
+    Sops,
+    /// The 1Password item meta.restoreItem points at.
+    OnePassword,
+    /// Typed on the screen.
+    Typed,
+}
+
+impl CredSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            CredSource::Sops => "the secrets (carried host key)",
+            CredSource::OnePassword => "1password",
+            CredSource::Typed => "typed in",
+        }
+    }
+}
+
+/// What restic needs to read the backup. Held in memory only; written to
+/// [`RESTIC_WORK`] (RAM, 0600) just while restic runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResticCreds {
+    /// e.g. rest:https://<server>:8000/<host>/ (sops restic/repository).
+    pub repository: Secret,
+    /// The repository's key (sops restic/password).
+    pub password: Secret,
+    /// Environment for restic, e.g. RESTIC_REST_USERNAME / RESTIC_REST_PASSWORD
+    /// (sops restic/env, minus RESTIC_CACERT: the repo's pinned cert is used).
+    pub env: Vec<(String, Secret)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HomeRestore {
+    pub creds: ResticCreds,
+    pub source: CredSource,
+    /// The snapshot the screen found ("2026-11-09 03:41 from arc"), for the log.
+    pub latest: String,
+}
+
 // ---------------------------------------------------------------- the plan
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +397,8 @@ pub struct Plan {
     /// Logged in to NetBird on the installer: its [`NETBIRD_STATE`] is copied
     /// into the new system.
     pub netbird: bool,
+    /// Restore /home/<user> from the homelab backup (only with [`restore_offered`]).
+    pub restore: Option<HomeRestore>,
 }
 
 /// Facts about this machine, gathered once at start (and shown on the welcome screen).
@@ -397,6 +448,10 @@ pub struct InstallData {
     /// system.stateVersion for new hosts.
     #[serde(default, rename = "stateVersion")]
     pub state_version: String,
+    /// meta.restoreItem: the 1Password item with the restic login
+    /// ("op://<vault>/<item>"); None = don't offer 1Password.
+    #[serde(default, rename = "restoreItem")]
+    pub restore_item: Option<String>,
 }
 
 impl InstallData {
@@ -531,6 +586,10 @@ pub struct Outcome {
     pub secrets_pending: bool,
     /// NetBird login carried or made on the installer: "ip (fqdn)" when known.
     pub netbird: Option<String>,
+    /// /home was restored from the homelab backup: what (the snapshot).
+    pub home_restored: Option<String>,
+    /// The restore was chosen but didn't finish: why (a next step says how to redo it).
+    pub restore_failed: Option<String>,
 }
 
 // ---------------------------------------------------------------- shared with Nix
@@ -551,6 +610,13 @@ pub const INSTALLED_KEYS: &str = "/persistent/etc/keys";
 pub const TPM_ENROLL_KEY: &str = "/persistent/install/tpm-enroll.key";
 /// gh's config dir on the installer (hosts.yml holds the login; RAM).
 pub const GH_CONFIG: &str = "/tmp/vx-install/gh";
+/// restic's repository and password files while it runs (tmpfs, 0700/0600; removed after).
+pub const RESTIC_WORK: &str = "/run/vx-install/restic";
+/// The 1Password CLI's config (its sign-in) on the installer (tmpfs; removed once read).
+pub const OP_CONFIG: &str = "/run/vx-install/op";
+/// The homelab rest-server's pinned certificate, relative to the repo (public;
+/// installed as /etc/restic/homelab-ca.pem by system/backups.nix).
+pub const RESTIC_CA_REL: &str = "assets/restic/homelab-ca.pem";
 
 /// NetBird's state directory, on the installer and in the installed system
 /// (services.netbird client "default": dir.state, NB_CONFIG = <it>/config.json).

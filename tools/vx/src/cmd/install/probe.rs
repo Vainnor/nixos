@@ -624,6 +624,7 @@ pub(crate) mod tests {
             home: HomePlan::Fresh,
             setup_mode: false,
             netbird: false,
+            restore: None,
         };
         // Installing onto the old disk (by-id): nothing left over.
         assert!(clashing_old_installs(&d, &plan("/dev/disk/by-id/nvme-CT1000P310SSD8_24304A1B2C3D", vec![])).is_empty());

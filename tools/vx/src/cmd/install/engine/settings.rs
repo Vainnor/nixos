@@ -155,6 +155,8 @@ pub fn personalise_meta(text: &str, p: &Personal) -> Result<String> {
     let t = set_raw(&t, "signingKey", "null", Some("your ssh public key here to sign commits (from your ssh agent / 1password)"), F)?;
     let t = set_raw(&t, "secretsReady", "false", None, F)?;
     let t = set_raw(&t, "resticReady", "false", None, F)?;
+    // The owner's 1Password item (the home restore's login); older meta.nix has none.
+    let t = if statement(&t, "restoreItem", F).is_ok() { set_raw(&t, "restoreItem", "null", None, F)? } else { t };
     set_raw(&t, "binaryCache", "null", None, F)
 }
 
@@ -363,6 +365,14 @@ mod tests {
         assert_eq!(statement(&out, "binaryCache", "m").map(|_| ()).ok(), Some(()));
         // Idempotent (a second run, or a fork that was personalised before).
         assert_eq!(personalise_meta(&out, &personal()).unwrap(), out);
+        // The owner's 1Password item goes (the real meta.nix has one; an older one none, and none is added).
+        assert!(!out.contains("op://"), "the owner's 1password item isn't the fork's");
+        let without: String = meta.lines().filter(|l| !l.contains("restoreItem")).map(|l| format!("{l}\n")).collect();
+        assert!(!personalise_meta(&without, &personal()).unwrap().contains("restoreItem"));
+        let with_item = without
+            .replace("    resticReady = false;\n", "    resticReady = false;\n    restoreItem = \"op://Private/arc restic\";\n");
+        let out2 = personalise_meta(&with_item, &personal()).unwrap();
+        assert!(out2.contains("    restoreItem = null;\n"), "the owner's 1password item isn't the fork's");
         // No keys on GitHub: an empty list.
         let none = personalise_meta(meta, &Personal { ssh_keys: vec![], ..personal() }).unwrap();
         assert!(none.contains("    sshKeys = [ ];\n"));

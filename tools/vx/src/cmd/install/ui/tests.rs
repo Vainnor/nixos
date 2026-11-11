@@ -3,10 +3,11 @@
 
 use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::plan::{
-    Carry, DataMode, GitHubMode, Gpu, HomePlan, HostPlan, Outcome, Previous, Secret, StepState, Unlocked, OLD_MOUNT, WORK_REPO,
+    Carry, CredSource, DataMode, GitHubMode, Gpu, HomePlan, HostPlan, Outcome, Previous, Secret, StepState, Unlocked, OLD_MOUNT,
+    WORK_REPO,
 };
 use super::super::engine::netbird::{Login as NbLogin, Start as NbStart, Status as NbStatus};
-use super::app::{App, Exit, Field, GhOut, GhPhase, HomeKind, Modal, NbOut, NbPhase, Progress, Screen, TaskOut, Use};
+use super::app::{App, Exit, Field, GhOut, GhPhase, HomeKind, Modal, NbOut, NbPhase, Progress, RsOut, RsPhase, Screen, TaskOut, Use};
 use super::backend::Backend;
 use super::{demo, view};
 use ratatui::Terminal;
@@ -499,6 +500,191 @@ fn install_end_to_end_with_the_dry_run_engine() {
     assert!(leak.is_empty(), "no passwords in the log: {leak:?}");
 }
 
+// ---------------------------------------------------------------- home backup
+
+/// Unlocked, /home made fresh, on NetBird: the restore step can run.
+fn fresh_on_netbird() -> App {
+    let mut a = unlocked();
+    passwords(&mut a);
+    a.home = HomeKind::Fresh;
+    a.carry.remove(&Carry::NetBird);
+    a.nb.skipped = false;
+    a.nb.host = "arc".into();
+    a.nb.phase = NbPhase::Done(nb_status());
+    a
+}
+
+fn ready(a: &mut App, src: CredSource) {
+    a.rs.want = true;
+    let c = super::super::engine::restic::typed("rest:https://restic-1.example:8000/arc/", "repo-pw-Wm4", "arc", "rest-pw-Jn8").unwrap();
+    a.apply(TaskOut::Rs(RsOut::Login(src, Ok(c)), vec![]));
+    a.task = None;
+    a.apply(TaskOut::Rs(RsOut::Checked(Ok("2026-11-09 03:41 from arc".into())), vec![]));
+}
+
+#[test]
+fn restore_step_only_for_a_fresh_home() {
+    let mut a = fresh_on_netbird();
+    let o = a.order();
+    let at = |o: &[Screen], s: Screen| o.iter().position(|x| *x == s);
+    assert_eq!(at(&o, Screen::Restore).unwrap(), at(&o, Screen::Passwords).unwrap() + 1, "after the passwords, before review");
+    assert_eq!(at(&o, Screen::Restore).unwrap() + 1, at(&o, Screen::Review).unwrap());
+    // Backup then fresh: offered. Keep: not offered, and a found backup isn't used.
+    a.home = HomeKind::Backup;
+    assert!(a.restore_offered());
+    a.home = HomeKind::Fresh;
+    ready(&mut a, CredSource::Typed);
+    assert!(a.build_plan().unwrap().restore.is_some());
+    a.home = HomeKind::Keep;
+    assert!(a.keeping() && !a.restore_offered());
+    assert!(!a.order().contains(&Screen::Restore));
+    assert!(a.build_plan().unwrap().restore.is_none());
+    // Not chosen: nothing to restore, and the step doesn't hold up the install.
+    let b = fresh_on_netbird();
+    assert!(b.check(Screen::Restore).is_ok());
+    assert!(b.build_plan().unwrap().restore.is_none());
+    // Offline: no step.
+    let mut c = App::new(Backend::Demo, true, None, None, false);
+    c.apply(TaskOut::Probed(Box::new(demo::machine()), Ok(demo::disks())));
+    assert!(!c.order().contains(&Screen::Restore));
+}
+
+#[test]
+fn restore_login_sources_in_order() {
+    // Carried host key: the secrets first (a task reads them).
+    let mut a = fresh_on_netbird();
+    a.go(Screen::Restore);
+    assert_eq!(a.restore_sources(), [CredSource::Sops, CredSource::OnePassword, CredSource::Typed]);
+    assert_eq!(
+        a.restore_sops_key().unwrap(),
+        PathBuf::from(format!("{OLD_MOUNT}/persistent/etc/ssh/ssh_host_ed25519_key")),
+        "the old install's key, still mounted"
+    );
+    a.rs_start();
+    assert!(a.rs.want);
+    assert!(a.task.as_ref().unwrap().label.contains("secrets"));
+    a.task = None;
+    // They can't: 1Password next (the item is set), with why the secrets didn't work.
+    a.apply(TaskOut::Rs(RsOut::Login(CredSource::Sops, Err("the carried host key isn't a recipient of secrets.yaml".into())), vec![]));
+    assert_eq!(a.rs.phase, RsPhase::OnePassword);
+    assert!(a.rs.sops_note.as_deref().unwrap().contains("recipient"));
+    assert_eq!(a.focus, Some(Field::RsOpEmail));
+    // A failed sign-in stays there; the password is cleared.
+    a.rs.op_email.value = "me@example.com".into();
+    a.rs.op_key.value = "A3-KEY".into();
+    a.rs.op_pw.value = "master".into();
+    a.rs_signin();
+    assert!(a.rs.op_pw.value.is_empty());
+    assert!(a.task.as_ref().unwrap().label.contains("1password"));
+    a.task = None;
+    a.apply(TaskOut::Rs(RsOut::Login(CredSource::OnePassword, Err("1password sign-in failed: wrong password".into())), vec![]));
+    assert_eq!(a.rs.phase, RsPhase::OnePassword);
+    assert!(a.rs.error.as_deref().unwrap().contains("sign-in failed"));
+    // Typing it is always there.
+    a.focus = Some(Field::RsType);
+    key(&mut a, KeyCode::Enter);
+    assert_eq!((a.rs.phase.clone(), a.focus), (RsPhase::Typed, Some(Field::RsRepo)));
+
+    // No host key carried, no item: straight to typing.
+    let mut b = fresh_on_netbird();
+    b.carry.remove(&Carry::HostKey);
+    b.data.as_mut().unwrap().restore_item = None;
+    assert_eq!(b.restore_sources(), [CredSource::Typed]);
+    b.rs_start();
+    assert_eq!(b.rs.phase, RsPhase::Typed);
+    assert!(b.task.is_none());
+    // Typed but incomplete: said so, nothing checked.
+    b.rs_check_typed();
+    assert!(b.rs.error.as_deref().unwrap().contains("repository"));
+    b.rs.repo.value = "rest:https://restic-1.example:8000/arc/".into();
+    b.rs.pw.value = "pw".into();
+    b.rs_check_typed();
+    assert!(b.task.as_ref().unwrap().label.contains("backup"));
+    assert_eq!(b.rs.creds.as_ref().unwrap().1, CredSource::Typed);
+    // No host key, an item: 1Password first.
+    let mut c = fresh_on_netbird();
+    c.carry.remove(&Carry::HostKey);
+    c.rs_start();
+    assert_eq!(c.rs.phase, RsPhase::OnePassword);
+}
+
+#[test]
+fn restore_needs_netbird_first() {
+    let mut a = unlocked();
+    passwords(&mut a);
+    a.home = HomeKind::Fresh;
+    a.nb.skipped = true;
+    // The netbird login is carried: no netbird step, until the restore wants it.
+    assert!(a.netbird_carried() && !a.order().contains(&Screen::NetBird));
+    a.go(Screen::Restore);
+    assert!(a.focusables().contains(&Field::RsNetbird) && !a.focusables().contains(&Field::RsRestore));
+    a.focus = Some(Field::RsNetbird);
+    key(&mut a, KeyCode::Enter);
+    assert_eq!(a.screen, Screen::NetBird);
+    assert!(a.order().contains(&Screen::NetBird) && !a.nb.skipped);
+    assert_eq!(a.nb_login_name(), "arc-usb", "the usb joins under its own name; the new system keeps the carried login");
+    assert!(a.build_plan().unwrap_err().contains("netbird"));
+    // Logged in: the restore can start; the new system still uses the carried login.
+    a.nb.host = "arc-usb".into();
+    a.apply(TaskOut::Nb(NbOut::Done(Ok(nb_status())), vec![]));
+    a.go(Screen::Restore);
+    assert!(a.focusables().contains(&Field::RsRestore));
+    assert!(a.check(Screen::Restore).unwrap_err().contains("backup"), "chosen, not checked yet");
+    ready(&mut a, CredSource::Sops);
+    let p = a.build_plan().unwrap();
+    assert!(p.netbird && p.carry.contains(&Carry::NetBird));
+    assert_eq!(p.restore.unwrap().source, CredSource::Sops);
+}
+
+#[test]
+fn restore_unreachable_offers_to_skip() {
+    let mut a = fresh_on_netbird();
+    a.go(Screen::Restore);
+    a.rs.want = true;
+    let c = super::super::engine::restic::typed("rest:https://x:8000/arc/", "pw", "", "").unwrap();
+    a.apply(TaskOut::Rs(RsOut::Login(CredSource::Typed, Ok(c)), vec![]));
+    a.task = None;
+    a.apply(TaskOut::Rs(RsOut::Checked(Err("can't reach the backup server: it's only reachable over netbird".into())), vec![]));
+    assert_eq!(a.rs.phase, RsPhase::Failed);
+    assert_eq!(a.focus, Some(Field::RsRetry));
+    assert!(a.check(Screen::Restore).is_err());
+    let f = a.focusables();
+    assert!(f.contains(&Field::RsRetry) && f.contains(&Field::RsType) && f.contains(&Field::RsNo));
+    // Try again: the same login, checked again.
+    a.rs_check();
+    assert!(a.task.is_some());
+    a.task = None;
+    // Skip: on to review, nothing restored.
+    a.focus = Some(Field::RsNo);
+    key(&mut a, KeyCode::Enter);
+    assert_eq!(a.screen, Screen::Review);
+    assert!(!a.rs.want && a.build_plan().unwrap().restore.is_none());
+}
+
+#[test]
+fn install_with_a_home_restore_dry_run() {
+    let mut a = fresh_on_netbird();
+    a.select_system(idx(&a, "/dev/sdc"));
+    ready(&mut a, CredSource::OnePassword);
+    a.go(Screen::Review);
+    assert!(render(&a, 120, 40).contains("home backup"));
+    a.confirm.value = "YES".into();
+    a.focus = Some(Field::Install);
+    key(&mut a, KeyCode::Enter);
+    let t = Instant::now();
+    while matches!(a.screen, Screen::Install) && t.elapsed() < Duration::from_secs(30) {
+        a.poll();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let p = a.progress.as_ref().unwrap();
+    assert_eq!(a.screen, Screen::Summary, "error: {:?}\n{}", p.error, p.log.join("\n"));
+    assert!(p.steps.iter().any(|s| s.0 == "restore /home from the homelab"));
+    assert!(p.log.iter().any(|l| l.starts_with("$ restic ") && l.contains("restore latest --target /mnt --include /home/vainnor")));
+    let all = p.log.join("\n");
+    assert!(!all.contains("repo-pw-Wm4") && !all.contains("rest-pw-Jn8"), "no backup login in the log");
+    assert!(render(&a, 120, 40).contains("/home restored from the backup of 2026-11-09 03:41 from arc"));
+}
+
 // ---------------------------------------------------------------- render dumps
 
 fn render(a: &App, w: u16, h: u16) -> String {
@@ -700,6 +886,35 @@ fn render_every_screen() {
     a.go(Screen::Options);
     dump("options-keep", &mut a);
 
+    // Home backup: ask, 1password, typed, unreachable, found.
+    let mut a = fresh_on_netbird();
+    a.go(Screen::Restore);
+    dump("restore-ask", &mut a);
+    let mut b = unlocked();
+    b.nb.skipped = true;
+    b.home = HomeKind::Fresh;
+    b.go(Screen::Restore);
+    dump("restore-needs-netbird", &mut b);
+    a.rs.want = true;
+    a.rs.sops_note = Some("the carried host key isn't a recipient of secrets.yaml".into());
+    a.rs.phase = RsPhase::OnePassword;
+    a.rs.op_email.value = "me@example.com".into();
+    a.rs.op_key.value = "A3-ABCDEF-SECRET".into();
+    a.rs.op_pw.value = "hunter2".into();
+    a.focus = Some(Field::RsOpPw);
+    dump("restore-1password", &mut a);
+    assert!(!render(&a, 120, 40).contains("hunter2") && !render(&a, 120, 40).contains("A3-ABCDEF"));
+    a.rs_type();
+    a.rs.repo.value = "rest:https://restic-1.netbird.cloud:8000/arc/".into();
+    dump("restore-typed", &mut a);
+    a.rs.phase = RsPhase::Failed;
+    a.rs.error = Some("can't reach the backup server: it's only reachable over netbird; is this usb logged in? (dial tcp: i/o timeout)".into());
+    a.focus = Some(Field::RsRetry);
+    dump("restore-unreachable", &mut a);
+    a.rs.error = None;
+    ready(&mut a, CredSource::OnePassword);
+    dump("restore-ready", &mut a);
+
     let mut a = prepared();
     a.skipped_previous = true;
     a.go(Screen::Passwords);
@@ -777,6 +992,8 @@ fn render_every_screen() {
         sb_enrolled: true,
         secrets_pending: true,
         netbird: Some("100.92.14.7 (arc.netbird.cloud)".into()),
+        home_restored: Some("2026-11-09 03:41 from arc".into()),
+        restore_failed: None,
     });
     a.screen = Screen::Summary;
     a.focus = None;

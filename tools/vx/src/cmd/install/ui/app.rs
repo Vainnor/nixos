@@ -3,11 +3,13 @@
 
 use super::super::engine::github::{Account, DeviceCode, Fork};
 use super::super::engine::netbird::{self as nbe, Login as NbLoginInfo, Status as NbStatus};
+use super::super::engine::restic::{self, OpLogin};
 use super::super::engine::settings::host_name;
 use super::super::engine::wifi::Network;
 use super::super::plan::{
-    Carry, DataDisk, DataMode, DiskInfo, DiskKind, Event, GitHubMode, GitHubPlan, Gpu, HomePlan, HostInfo, HostPlan, InstallData,
-    Machine, NewHost, Outcome, Plan, Previous, Secret, Settings, StepState, SystemDisk, Unlocked, WORK, WORK_REPO, with_requires,
+    Carry, CredSource, DataDisk, DataMode, DiskInfo, DiskKind, Event, GitHubMode, GitHubPlan, Gpu, HomePlan, HomeRestore, HostInfo,
+    HostPlan, InstallData, Machine, NewHost, Outcome, Plan, Previous, ResticCreds, Secret, Settings, StepState, SystemDisk, Unlocked,
+    WORK, WORK_REPO, with_requires,
 };
 use super::super::probe::{self, BackupTarget};
 use super::backend::Backend;
@@ -37,6 +39,8 @@ pub enum Screen {
     Data,
     Options,
     Passwords,
+    /// Restore /home from the homelab backup (fresh /home only).
+    Restore,
     Review,
     Install,
     Summary,
@@ -45,15 +49,15 @@ pub enum Screen {
     Wifi,
 }
 
-pub const STEPS: [&str; 11] =
-    ["welcome", "github", "machine", "previous", "netbird", "system", "data", "options", "passwords", "review", "install"];
+pub const STEPS: [&str; 12] =
+    ["welcome", "github", "machine", "previous", "netbird", "system", "data", "options", "passwords", "restore", "review", "install"];
 
 impl Screen {
     pub fn step(self) -> usize {
         if self == Screen::Wifi {
             return 0;
         }
-        (self as usize).min(10)
+        (self as usize).min(STEPS.len() - 1)
     }
     pub fn title(self) -> &'static str {
         match self {
@@ -66,6 +70,7 @@ impl Screen {
             Screen::Data => "data drives",
             Screen::Options => "options",
             Screen::Passwords => "passwords",
+            Screen::Restore => "home backup",
             Screen::Review => "review",
             Screen::Install => "installing",
             Screen::Summary => "done",
@@ -147,6 +152,25 @@ pub enum Field {
     SameAsDisk,
     LoginPw1,
     LoginPw2,
+    /// Restore: yes, from the backup.
+    RsRestore,
+    /// Restore: log in to NetBird first.
+    RsNetbird,
+    /// Restore: no (or skip it, the backup can't be read).
+    RsNo,
+    RsOpAddress,
+    RsOpEmail,
+    RsOpKey,
+    RsOpPw,
+    RsSignIn,
+    /// Type the login instead.
+    RsType,
+    RsRepo,
+    RsPw,
+    RsUser,
+    RsRestPw,
+    RsCheck,
+    RsRetry,
     ConfirmYes,
     Install,
     Next,
@@ -173,6 +197,14 @@ impl Field {
                 | Field::DiskPw2
                 | Field::LoginPw1
                 | Field::LoginPw2
+                | Field::RsOpAddress
+                | Field::RsOpEmail
+                | Field::RsOpKey
+                | Field::RsOpPw
+                | Field::RsRepo
+                | Field::RsPw
+                | Field::RsUser
+                | Field::RsRestPw
                 | Field::ConfirmYes
         )
     }
@@ -240,6 +272,50 @@ pub enum TaskOut {
     Nb(NbOut, Vec<String>),
     /// Wi-Fi scan / connect, with the commands it ran.
     Wifi(WifiOut, Vec<String>),
+    /// The home backup's login and check, with the commands it ran.
+    Rs(RsOut, Vec<String>),
+}
+
+pub enum RsOut {
+    /// The login from this source, or why not.
+    Login(CredSource, Result<ResticCreds, String>),
+    /// The backup can be read: its latest snapshot.
+    Checked(Result<String, String>),
+}
+
+/// Where the restore step is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RsPhase {
+    /// Restore or not.
+    Ask,
+    /// Signing in to 1Password.
+    OnePassword,
+    /// Typing the login.
+    Typed,
+    /// The backup can't be read with the login (the error says why).
+    Failed,
+    /// Ready: the latest snapshot.
+    Ready(String),
+}
+
+/// The home backup step.
+pub struct Rs {
+    pub phase: RsPhase,
+    /// Restoring was chosen (shows the netbird step, even with a carried login).
+    pub want: bool,
+    pub error: Option<String>,
+    /// Why the secrets couldn't give the login (they're tried first).
+    pub sops_note: Option<String>,
+    /// The login and where it came from (checked when phase is Ready).
+    pub creds: Option<(ResticCreds, CredSource)>,
+    pub op_address: Input,
+    pub op_email: Input,
+    pub op_key: Input,
+    pub op_pw: Input,
+    pub repo: Input,
+    pub pw: Input,
+    pub user: Input,
+    pub rest_pw: Input,
 }
 
 pub enum WifiOut {
@@ -424,6 +500,7 @@ pub struct App {
     pub gh: Gh,
     pub nb: Nb,
     pub wifi: Wifi,
+    pub rs: Rs,
     pub full_name: Input,
     pub email: Input,
 
@@ -500,6 +577,21 @@ impl App {
             gh: Gh { phase: GhPhase::Start, error: None, unreachable: false, skipped: false, push: true, cancel: None, rx: None },
             wifi: Wifi { networks: None, sel: None, pw: Input::secret(), error: None, connected: None },
             nb: Nb { phase: NbPhase::Start, error: None, skipped: false, host: String::new(), cancel: None, rx: None },
+            rs: Rs {
+                phase: RsPhase::Ask,
+                want: false,
+                error: None,
+                sops_note: None,
+                creds: None,
+                op_address: Input::new(restic::OP_ADDRESS),
+                op_email: Input::default(),
+                op_key: Input::secret(),
+                op_pw: Input::secret(),
+                repo: Input::default(),
+                pw: Input::secret(),
+                user: Input::default(),
+                rest_pw: Input::secret(),
+            },
             full_name: Input::default(),
             email: Input::default(),
             host_choice: None,
@@ -642,6 +734,10 @@ impl App {
             TaskOut::Wifi(out, logs) => {
                 self.pre_log.extend(logs);
                 self.apply_wifi(out);
+            }
+            TaskOut::Rs(out, logs) => {
+                self.pre_log.extend(logs);
+                self.apply_rs(out);
             }
             TaskOut::Unlocked(Ok(u)) => {
                 self.carry = u.available.clone();
@@ -871,7 +967,7 @@ impl App {
     pub fn nb_login(&mut self) {
         self.nb.error = None;
         self.nb.skipped = false;
-        let host = self.host_name();
+        let host = self.nb_login_name();
         self.nb.host = host.clone();
         let b = self.backend;
         self.spawn("starting netbird", move || {
@@ -908,9 +1004,175 @@ impl App {
         self.carry.contains(&Carry::NetBird) && self.unlocked.as_ref().is_some_and(|u| u.available.contains(&Carry::NetBird))
     }
 
-    /// The netbird step is part of this install (online, nothing carried).
+    /// The netbird step is part of this install (online, nothing carried; or
+    /// carried, but the home restore needs this usb on NetBird).
     pub fn uses_netbird(&self) -> bool {
-        self.uses_github() && !self.netbird_carried()
+        self.uses_github() && (!self.netbird_carried() || self.rs.want)
+    }
+
+    /// The name this usb joins NetBird as: the machine's, or `<host>-usb` when
+    /// the new system keeps its carried login (only the restore needs it).
+    pub fn nb_login_name(&self) -> String {
+        let host = self.host_name();
+        if self.netbird_carried() { format!("{host}-usb") } else { host }
+    }
+
+    // ------------------------------------------------------------ home backup
+
+    /// The restore step is offered: online, and /home isn't kept.
+    pub fn restore_offered(&self) -> bool {
+        self.uses_github() && !self.keeping()
+    }
+
+    /// The carried-over host key (in the old install, still mounted read-only), when it's carried.
+    pub fn restore_sops_key(&self) -> Option<PathBuf> {
+        let u = self.unlocked.as_ref()?;
+        (self.carry.contains(&Carry::HostKey) && u.available.contains(&Carry::HostKey))
+            .then(|| u.persistent.join("etc/ssh/ssh_host_ed25519_key"))
+    }
+
+    pub fn restore_item(&self) -> Option<String> {
+        self.data.as_ref().and_then(|d| d.restore_item.clone()).filter(|i| !i.trim().is_empty())
+    }
+
+    /// Where the login can come from, in order (engine::restic::sources).
+    pub fn restore_sources(&self) -> Vec<CredSource> {
+        restic::sources(self.restore_sops_key().is_some(), self.restore_item().as_deref())
+    }
+
+    fn restore_repo(&self) -> PathBuf {
+        self.work_repo.clone().unwrap_or_else(|| PathBuf::from(WORK_REPO))
+    }
+
+    /// [ restore from the backup ]: NetBird first, then the first source.
+    pub fn rs_start(&mut self) {
+        self.rs.want = true;
+        self.rs.error = None;
+        self.rs.sops_note = None;
+        if !self.nb.done() {
+            return self.rs_netbird();
+        }
+        if let Some(first) = self.restore_sources().first().copied() {
+            self.rs_try(first);
+        }
+    }
+
+    /// The netbird step, to log this usb in (the backup is only reachable over NetBird).
+    pub fn rs_netbird(&mut self) {
+        self.rs.want = true;
+        self.nb.skipped = false;
+        self.go(Screen::NetBird);
+        self.say(Level::Info, "log in to netbird, then come back to the home backup step");
+    }
+
+    fn rs_try(&mut self, src: CredSource) {
+        self.rs.error = None;
+        match src {
+            CredSource::Sops => {
+                let Some(key) = self.restore_sops_key() else { return self.rs_after(CredSource::Sops) };
+                let (b, repo) = (self.backend, self.restore_repo());
+                self.spawn("reading the backup's login from the secrets", move || {
+                    let (res, logs) = b.restic_sops(&repo, &key);
+                    TaskOut::Rs(RsOut::Login(CredSource::Sops, res.map_err(|e| format!("{e:#}"))), logs)
+                });
+            }
+            CredSource::OnePassword => {
+                self.rs.phase = RsPhase::OnePassword;
+                self.focus = Some(if self.rs.op_email.value.is_empty() { Field::RsOpEmail } else { Field::RsOpPw });
+            }
+            CredSource::Typed => self.rs_type(),
+        }
+    }
+
+    /// The source after `src` (the secrets didn't work: 1Password, else typing).
+    fn rs_after(&mut self, src: CredSource) {
+        let all = self.restore_sources();
+        let next = all.iter().skip_while(|s| **s != src).nth(1).copied().unwrap_or(CredSource::Typed);
+        self.rs_try(next);
+    }
+
+    pub fn rs_type(&mut self) {
+        self.rs.phase = RsPhase::Typed;
+        self.rs.error = None;
+        self.focus = Some(Field::RsRepo);
+    }
+
+    /// [ no ] / [ skip ]: a fresh, empty /home; on to the next step.
+    pub fn rs_skip(&mut self) {
+        self.rs.want = false;
+        self.rs.phase = RsPhase::Ask;
+        self.rs.creds = None;
+        self.rs.error = None;
+        self.rs.op_pw.clear();
+        self.next();
+    }
+
+    pub fn rs_signin(&mut self) {
+        let Some(item) = self.restore_item() else { return self.rs_type() };
+        let login = OpLogin {
+            address: self.rs.op_address.value.clone(),
+            email: self.rs.op_email.value.clone(),
+            secret_key: Secret(self.rs.op_key.value.clone()),
+            password: Secret(self.rs.op_pw.value.clone()),
+        };
+        self.rs.op_pw.clear();
+        self.rs.error = None;
+        let b = self.backend;
+        self.spawn("signing in to 1password", move || {
+            let (res, logs) = b.restic_op(&login, &item);
+            TaskOut::Rs(RsOut::Login(CredSource::OnePassword, res.map_err(|e| format!("{e:#}"))), logs)
+        });
+    }
+
+    /// [ check the backup ] with the typed login.
+    pub fn rs_check_typed(&mut self) {
+        let r = &self.rs;
+        let res = restic::typed(&r.repo.value, &r.pw.value, &r.user.value, &r.rest_pw.value).map_err(|e| format!("{e:#}"));
+        self.apply_rs(RsOut::Login(CredSource::Typed, res));
+    }
+
+    /// Check the backup with the login there is (again, after it failed).
+    pub fn rs_check(&mut self) {
+        let Some((creds, _)) = self.rs.creds.clone() else { return self.rs_type() };
+        self.rs.error = None;
+        let (b, repo) = (self.backend, self.restore_repo());
+        self.spawn("looking for the backup on the homelab", move || {
+            let (res, logs) = b.restic_check(&creds, &repo);
+            TaskOut::Rs(RsOut::Checked(res.map_err(|e| format!("{e:#}"))), logs)
+        });
+    }
+
+    fn apply_rs(&mut self, out: RsOut) {
+        match out {
+            RsOut::Login(src, Ok(c)) => {
+                self.rs.creds = Some((c, src));
+                self.rs_check();
+            }
+            RsOut::Login(CredSource::Sops, Err(e)) => {
+                self.rs.sops_note = Some(e);
+                self.rs_after(CredSource::Sops);
+            }
+            RsOut::Login(_, Err(e)) => self.rs.error = Some(e),
+            RsOut::Checked(Ok(latest)) => {
+                self.rs.error = None;
+                self.rs.phase = RsPhase::Ready(latest);
+                self.rs.pw.clear();
+                self.rs.rest_pw.clear();
+                self.focus = None;
+            }
+            RsOut::Checked(Err(e)) => {
+                self.rs.error = Some(e);
+                self.rs.phase = RsPhase::Failed;
+                self.focus = Some(Field::RsRetry);
+            }
+        }
+    }
+
+    /// The plan's restore: chosen, offered, and the backup was found.
+    pub fn home_restore(&self) -> Option<HomeRestore> {
+        let RsPhase::Ready(latest) = &self.rs.phase else { return None };
+        let (creds, source) = self.rs.creds.clone()?;
+        (self.rs.want && self.restore_offered()).then(|| HomeRestore { creds, source, latest: latest.clone() })
     }
 
     /// [ log in ]: get a code; the wait for it runs in the background.
@@ -1276,7 +1538,11 @@ impl App {
         if self.uses_netbird() {
             v.push(Screen::NetBird);
         }
-        v.extend([Screen::System, Screen::Data, Screen::Options, Screen::Passwords, Screen::Review]);
+        v.extend([Screen::System, Screen::Data, Screen::Options, Screen::Passwords]);
+        if self.restore_offered() {
+            v.push(Screen::Restore);
+        }
+        v.push(Screen::Review);
         v
     }
 
@@ -1349,6 +1615,13 @@ impl App {
             Screen::Data => self.check_data(),
             Screen::Options => self.check_options(),
             Screen::Passwords => self.check_passwords(),
+            Screen::Restore => {
+                if !self.rs.want || !self.restore_offered() || matches!(self.rs.phase, RsPhase::Ready(_)) {
+                    Ok(())
+                } else {
+                    Err("finish the backup's login, or choose not to restore".into())
+                }
+            }
             Screen::Review => {
                 for s in self.order() {
                     if s != Screen::Review {
@@ -1533,7 +1806,17 @@ impl App {
     }
 
     pub fn build_plan(&self) -> Result<Plan, String> {
-        for s in [Screen::GitHub, Screen::Machine, Screen::Previous, Screen::NetBird, Screen::System, Screen::Data, Screen::Options, Screen::Passwords] {
+        for s in [
+            Screen::GitHub,
+            Screen::Machine,
+            Screen::Previous,
+            Screen::NetBird,
+            Screen::System,
+            Screen::Data,
+            Screen::Options,
+            Screen::Passwords,
+            Screen::Restore,
+        ] {
             self.check(s)?;
         }
         let data = self.data.as_ref().ok_or("the install data isn't loaded")?;
@@ -1610,6 +1893,7 @@ impl App {
             home,
             setup_mode: self.machine.as_ref().is_some_and(|m| m.setup_mode),
             netbird: self.uses_netbird() && self.nb.done(),
+            restore: self.home_restore(),
         })
     }
 
@@ -1786,6 +2070,8 @@ impl App {
                     match f {
                         Field::UnlockPassword => self.unlock(),
                         Field::WifiPw => self.wifi_connect(),
+                        Field::RsOpPw => self.rs_signin(),
+                        Field::RsRestPw => self.rs_check_typed(),
                         Field::ConfirmYes => self.next(),
                         _ => self.move_focus(1),
                     }
@@ -1848,6 +2134,14 @@ impl App {
             Field::DiskPw2 => &mut self.disk_pw2,
             Field::LoginPw1 => &mut self.login_pw1,
             Field::LoginPw2 => &mut self.login_pw2,
+            Field::RsOpAddress => &mut self.rs.op_address,
+            Field::RsOpEmail => &mut self.rs.op_email,
+            Field::RsOpKey => &mut self.rs.op_key,
+            Field::RsOpPw => &mut self.rs.op_pw,
+            Field::RsRepo => &mut self.rs.repo,
+            Field::RsPw => &mut self.rs.pw,
+            Field::RsUser => &mut self.rs.user,
+            Field::RsRestPw => &mut self.rs.rest_pw,
             Field::ConfirmYes => &mut self.confirm,
             _ => return,
         };

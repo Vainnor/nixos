@@ -83,6 +83,11 @@ pub fn summary_rows(app: &App, w: usize) -> Vec<Row> {
     if let Some(n) = &o.netbird {
         r.push(Row::colored(t.green, format!("netbird: {n}")));
     }
+    if let Some(h) = &o.home_restored {
+        r.push(Row::colored(t.green, format!("/home restored from the backup of {h}")));
+    } else if o.restore_failed.is_some() {
+        r.push(Row::colored(t.yellow, "/home wasn't restored from the backup (see below)"));
+    }
     match (&o.pushed, &o.not_pushed) {
         (Some(p), _) => r.push(Row::colored(t.green, format!("pushed to github: {p}"))),
         (None, Some(why)) => {

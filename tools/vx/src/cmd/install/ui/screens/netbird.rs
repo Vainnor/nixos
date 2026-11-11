@@ -1,5 +1,8 @@
 //! The netbird step: log this machine in to NetBird now (a link and a code,
-//! opened on your phone), so it's on the mesh from its first boot.
+//! opened on your phone), so it's on the mesh from its first boot. With a
+//! carried-over login it only shows for the home restore (the backup is only
+//! reachable over NetBird): the usb then joins as `<host>-usb`, and the new
+//! system keeps its own login.
 
 use super::super::app::{Act, App, Field, NbPhase};
 use super::super::form::{Row, button_row, wrap};
@@ -15,14 +18,16 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         NbPhase::Start => {
             r.push(Row::heading(t, "log in to netbird"));
             r.push(Row::blank());
-            r.extend(para(
-                t,
-                &format!(
-                    "{host} joins your netbird network now, so it's reachable from its first boot. \
-                     you log in with a link on your phone or another computer."
-                ),
-                w,
-            ));
+            let why = if app.netbird_carried() {
+                format!(
+                    "the home backup is only reachable over netbird. {host} keeps its carried-over login; this usb joins \
+                     as {} just for the restore (remove it from netbird's peers afterwards).",
+                    app.nb_login_name()
+                )
+            } else {
+                format!("{host} joins your netbird network now, so it's reachable from its first boot.")
+            };
+            r.extend(para(t, &format!("{why} you log in with a link on your phone or another computer."), w));
             r.push(Row::blank());
             if let Some(e) = &app.nb.error {
                 for l in wrap(e, w.saturating_sub(1)) {
@@ -63,11 +68,15 @@ pub fn rows(app: &App, w: usize) -> Vec<Row> {
         NbPhase::Done(st) => {
             r.push(mark(t, 0, format!("logged in as {}", app.nb.host)));
             r.push(mark(t, 0, format!("address {}", st.show())));
-            if app.nb.host != host {
+            if app.nb.host != app.nb_login_name() {
                 r.push(mark(t, 1, format!("the machine is called {host} now: netbird keeps the name {}", app.nb.host)));
             }
             r.push(Row::blank());
-            r.extend(para(t, "the login is copied into the new system; this usb disconnects before the install.", w));
+            if app.netbird_carried() {
+                r.extend(para(t, "the new system keeps its carried-over login; this usb stays on netbird for the restore.", w));
+            } else {
+                r.extend(para(t, "the login is copied into the new system; this usb disconnects before the install.", w));
+            }
             r.push(Row::blank());
             r.push(button_row(t, Field::Next, "next"));
         }

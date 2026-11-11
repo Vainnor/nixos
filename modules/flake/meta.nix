@@ -5,7 +5,7 @@
 #
 # In a fork: the installer rewrites username, fullName, email, sshKeys,
 # signingKey and repoUrl for you, turns secretsReady and resticReady off and
-# sets binaryCache to null. The owner-only values (githubUser, macHost,
+# sets restoreItem and binaryCache to null. The owner-only values (githubUser, macHost,
 # macLibrewolfProfile) are harmless to keep: they only matter on the owner's
 # Mac and to the installer's "who pushes where" check.
 { lib, ... }:
@@ -82,6 +82,13 @@
     # restic off-site backups. Turn on once restic/* is filled in secrets.yaml
     # (`vx secrets edit`) and secretsReady is true.
     resticReady = true;
+
+    # The 1Password item with the backup's login, for the installer's "restore
+    # /home from the homelab backup" on a reinstall that can't read the secrets
+    # yet (a new disk: no carried host key). Fields: repository, password,
+    # rest_username, rest_password (the same values as restic/*). The login is
+    # read on the installer and never written to the repo. null = don't offer 1Password.
+    restoreItem = "op://Private/arc restic";
 
     # Homelab binary cache (Attic). null = off. Fill in from the homelab, e.g.
     #   { endpoint = "https://cache.lab.vainnor.com"; cache = "nixos";

@@ -218,6 +218,7 @@ pub fn data() -> InstallData {
         })
         .to_vec(),
         state_version: "26.11".into(),
+        restore_item: Some("op://Private/arc restic".into()),
     }
 }
 

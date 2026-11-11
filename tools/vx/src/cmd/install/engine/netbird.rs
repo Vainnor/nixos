@@ -16,8 +16,9 @@
 //!
 //! Before the copy into the new system (restore) the engine runs
 //! `netbird down`, so the installer and the installed system never connect
-//! with the same key at the same time. The private key in config.json is
-//! never logged.
+//! with the same key at the same time. The home backup restore (restic.rs)
+//! runs before that, while the usb can still reach the homelab. The private
+//! key in config.json is never logged.
 //!
 //! Graphical-session variables are cleared for `up` so the browser (PKCE)
 //! flow, which needs a browser on this machine, is never picked.

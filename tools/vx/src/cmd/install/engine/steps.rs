@@ -1,14 +1,19 @@
 //! The install, step by step. Each step is one function; `run` in engine.rs
 //! calls them in order and reports progress.
+//!
+//! The home backup restore (restic.rs) runs once the disks are mounted and
+//! before restore, which takes the usb off NetBird; the backup is only
+//! reachable over it.
 
 use super::super::plan::{
     Carry, DATA_KEYS, DISK_KEY, DataMode, GH_CONFIG, GitHubMode, HOST_KEY_WORK, HomePlan, HostPlan, INSTALLED_KEYS, NETBIRD_STATE,
-    Outcome, Plan, SBCTL_DIR, SECRETS_OK, TPM_ENROLL_KEY, Unlocked, WORK, disks_json_path, hardware_path, host_dir, host_json_path,
+    OP_CONFIG, Outcome, Plan, RESTIC_CA_REL, RESTIC_WORK, SBCTL_DIR, SECRETS_OK, TPM_ENROLL_KEY, Unlocked, WORK, disks_json_path,
+    hardware_path, host_dir, host_json_path, restore_offered,
 };
 use super::disk::{self, find_part};
 use super::finish::{self, NextInput, PushState};
 use super::runner::{Cmd, Runner, shell_quote};
-use super::{github, netbird, previous, settings, wifi};
+use super::{github, netbird, previous, restic, settings, wifi};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
@@ -48,6 +53,7 @@ pub enum Step {
     Settings,
     Disks,
     Hardware,
+    HomeRestore,
     Restore,
     SecureBoot,
     Commit,
@@ -67,6 +73,7 @@ impl Step {
             Step::Disks if plan.home == HomePlan::Keep => "replace the system, keep /home",
             Step::Disks => "partition and format",
             Step::Hardware => "detect the hardware",
+            Step::HomeRestore => "restore /home from the homelab",
             Step::Restore if carries(plan) => "restore carried state",
             Step::Restore => "set up passwords and keys",
             Step::SecureBoot => "enroll secure boot keys",
@@ -96,6 +103,10 @@ pub fn plan_steps(plan: &Plan) -> Vec<Step> {
     // of the commit, which has to exist before nixos-install builds the flake.
     if plan.host.is_new() {
         v.push(Step::Hardware);
+    }
+    // Into the new /home while the usb is still on NetBird (restore takes it off).
+    if plan.restore.is_some() && restore_offered(&plan.home) {
+        v.push(Step::HomeRestore);
     }
     v.push(Step::Restore);
     // Firmware in Setup Mode: enroll the keys now, so nixos-install signs with them.
@@ -132,6 +143,12 @@ pub struct Run<'a> {
     pub sops_edited: bool,
     /// The NetBird login made on the installer ("ip (fqdn)").
     pub netbird: Option<String>,
+    /// The home restore ran (/home/<user> may hold files: ~/nixos is moved aside).
+    pub home_restored: bool,
+    /// uid and gid of the restored /home/<user>, as the backed-up system had them.
+    pub restored_ids: Option<(u32, u32)>,
+    /// The restore didn't finish: why.
+    pub restore_failed: Option<String>,
     pub outcome: Option<Outcome>,
 }
 
@@ -150,6 +167,9 @@ impl<'a> Run<'a> {
             secrets_ready: false,
             sops_edited: false,
             netbird: None,
+            home_restored: false,
+            restored_ids: None,
+            restore_failed: None,
             outcome: None,
         }
     }
@@ -162,6 +182,7 @@ impl<'a> Run<'a> {
             Step::Settings => self.settings(),
             Step::Disks => self.disks(),
             Step::Hardware => self.hardware(),
+            Step::HomeRestore => self.home_restore(),
             Step::Restore => self.restore(),
             Step::SecureBoot => self.secure_boot(),
             Step::Commit => self.commit(),
@@ -285,7 +306,7 @@ impl<'a> Run<'a> {
             self.r.log(format!("edit {META_REL}: username, flakePath, timeZone, wallpaper, theme"));
             if personal.is_some() {
                 self.r.log(format!(
-                    "edit {META_REL} for your fork: fullName, email, repoUrl, githubUser, sshKeys, signingKey, secretsReady, resticReady, binaryCache"
+                    "edit {META_REL} for your fork: fullName, email, repoUrl, githubUser, sshKeys, signingKey, secretsReady, resticReady, restoreItem, binaryCache"
                 ));
             }
         }
@@ -383,6 +404,46 @@ impl<'a> Run<'a> {
         let rel = hardware_path(host);
         self.r.write(&self.plan.flake.join(&rel), out.as_bytes(), 0o644)?;
         self.r.run(self.git().args(["add", "--", &rel]))?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ 3c. home restore
+
+    /// The latest snapshot's /home/<user> into the new /home (restic.rs).
+    /// Tried [`restic::ATTEMPTS`] times; if it still stops, the install goes on
+    /// and the summary says how to restore later.
+    fn home_restore(&mut self) -> Result<()> {
+        let Some(hr) = &self.plan.restore else { return Ok(()) };
+        let user = self.user().to_string();
+        let ca = restic::ca(&self.r, &self.plan.flake);
+        if ca.is_none() {
+            self.r.log(format!("{RESTIC_CA_REL} isn't in the repo: the server's certificate can't be checked"));
+        }
+        self.r.log(format!("restoring /home/{user} from the backup of {} (login: {})", hr.latest, hr.source.label()));
+        restic::write_creds(&self.r, &hr.creds)?;
+        let r = &self.r;
+        let failed = restic::retry(
+            restic::ATTEMPTS,
+            |_| r.run(restic::restore_cmd(&hr.creds, ca.as_deref(), &user)).map(|_| ()),
+            |n, why| {
+                r.log(format!("the restore stopped ({why}): again in 15 s ({} of {}); what's there already is skipped", n + 1, restic::ATTEMPTS));
+                if !r.dry() {
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                }
+            },
+        );
+        restic::remove_creds(&self.r);
+        self.home_restored = true;
+        let home = mnt(&format!("/home/{user}"));
+        if self.r.exists(&home, true) {
+            let ids = self.r.query(Cmd::new("stat").args(["-c", "%u %g"]).arg(home.to_string_lossy()).fake("1000 100\n"))?;
+            let mut it = ids.split_whitespace().filter_map(|n| n.parse::<u32>().ok());
+            self.restored_ids = it.next().zip(it.next());
+        }
+        if let Some(why) = failed {
+            self.r.log(format!("the restore didn't finish ({why}): the install goes on; restore later with vx restore --restic"));
+            self.restore_failed = Some(why);
+        }
         Ok(())
     }
 
@@ -716,10 +777,12 @@ impl<'a> Run<'a> {
         let home = mnt(&format!("/home/{user}"));
         let dest = home.join("nixos");
         let keep = self.plan.home == HomePlan::Keep;
-        if !self.r.exists(&home, keep) {
+        // A restored home may hold an old ~/nixos too: moved aside like a kept one.
+        let lived_in = keep || self.home_restored;
+        if !self.r.exists(&home, lived_in) {
             self.r.mkdir(&home, 0o700)?;
         }
-        if keep && self.r.exists(&dest, true) {
+        if lived_in && self.r.exists(&dest, true) {
             let mut aside = home.join(format!("nixos.before-reinstall-{}", finish::today()));
             let mut n = 2;
             while self.r.exists(&aside, false) {
@@ -737,16 +800,16 @@ impl<'a> Run<'a> {
         let hosts = Path::new(GH_CONFIG).join("hosts.yml");
         if self.plan.github.mode != GitHubMode::Offline && self.r.exists(&hosts, true) {
             let gh_dir = home.join(".config/gh");
-            if !self.r.exists(&home.join(".config"), keep) {
+            if !self.r.exists(&home.join(".config"), lived_in) {
                 self.r.mkdir(&home.join(".config"), 0o755)?;
             }
-            if !self.r.exists(&gh_dir, keep) {
+            if !self.r.exists(&gh_dir, lived_in) {
                 self.r.mkdir(&gh_dir, 0o700)?;
             }
             self.r.copy_file(&hosts, &gh_dir.join("hosts.yml"), 0o600)?;
             self.gh_copied = true;
         }
-        self.r.run(chown_cmd(self.plan, keep, self.gh_copied))?;
+        self.r.run(chown_cmd(self.plan, keep, self.gh_copied, self.restored_ids))?;
         Ok(())
     }
 
@@ -779,6 +842,8 @@ impl<'a> Run<'a> {
             sb_enrolled: self.sb_enrolled,
             tpm: plan.system.encrypt && plan.system.tpm,
             secrets_pending: self.secrets_pending(),
+            restore_failed: self.restore_failed.clone(),
+            user: plan.settings.username.clone(),
         };
         let netbird_carried = plan.carry.contains(&Carry::NetBird) && plan.previous.is_some();
         self.outcome = Some(Outcome {
@@ -793,6 +858,8 @@ impl<'a> Run<'a> {
             sb_enrolled: self.sb_enrolled,
             secrets_pending: self.secrets_pending(),
             netbird: if netbird_carried { Some("carried over".into()) } else { self.netbird.clone() },
+            home_restored: plan.restore.as_ref().filter(|_| self.home_restored && self.restore_failed.is_none()).map(|h| h.latest.clone()),
+            restore_failed: self.restore_failed.clone(),
         });
         Ok(())
     }
@@ -986,11 +1053,19 @@ pub fn old_user(users: &[String], old_default: Option<&str>, new: &str) -> Optio
     old_default.filter(|d| users.iter().any(|u| u == d)).map(str::to_string)
 }
 
-/// One nixos-enter: the repo, the home folder, gh's login and new data drives under it belong to the user.
-pub fn chown_cmd(plan: &Plan, keep: bool, gh: bool) -> Cmd {
+/// One nixos-enter: the repo, the home folder, gh's login and new data drives
+/// under it belong to the user. A home restored from the backup keeps the old
+/// system's numeric owners; `restored` (that uid, gid) is handed over to the
+/// user and `users` as this system made them, when they differ.
+pub fn chown_cmd(plan: &Plan, keep: bool, gh: bool, restored: Option<(u32, u32)>) -> Cmd {
     let u = &plan.settings.username;
     let home = format!("/home/{u}");
-    let mut parts = vec![format!("chown -R {u}:users {}", shell_quote(&format!("{home}/nixos"))), format!("chown {u}:users {home}")];
+    let mut parts = vec![];
+    if let Some((uid, gid)) = restored {
+        parts.push(format!("{{ [ \"$(id -u {u})\" = {uid} ] || chown -hR --from={uid} {u} {home}; }}"));
+        parts.push(format!("{{ [ \"$(id -g {u})\" = {gid} ] || chown -hR --from=:{gid} :users {home}; }}"));
+    }
+    parts.extend([format!("chown -R {u}:users {}", shell_quote(&format!("{home}/nixos"))), format!("chown {u}:users {home}")]);
     if !keep {
         parts.push(format!("chmod 700 {home}"));
     }
@@ -1027,6 +1102,8 @@ pub fn stage_secure_boot_keys(r: &Runner, plan: &Plan) -> Result<()> {
 pub fn cleanup_secrets(r: &Runner) {
     let _ = r.remove(Path::new(DISK_KEY));
     let _ = r.remove(Path::new(DATA_KEYS));
+    let _ = r.remove(Path::new(RESTIC_WORK));
+    let _ = r.remove(Path::new(OP_CONFIG));
 }
 
 /// Close every LUKS mapping on the system and data drives. Best effort.

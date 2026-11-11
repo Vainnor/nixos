@@ -29,6 +29,12 @@
 # NetBird: the same client and paths as the installed system
 # (/var/lib/netbird/config.json), so the login made here (`netbird up
 # --hostname <host>`) is copied to /persistent/var/lib/netbird as is.
+#
+# Home backup: restic and the 1Password CLI (`op`), so a fresh /home can be
+# restored from the homelab before the first boot (over NetBird). `op` signs
+# in with its config in /run (RAM) and forgets it once the login is read.
+# The only unfree package here, allowed by name (like unfree.allowed in
+# system/nix.nix, which the ISO doesn't import).
 {
   inputs,
   self,
@@ -152,6 +158,7 @@ in
         in
         {
           nixpkgs.hostPlatform = system;
+          nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [ "1password-cli" ];
           nix.settings.experimental-features = [
             "nix-command"
             "flakes"
@@ -186,7 +193,9 @@ in
             pciutils # lspci: the installer detects the GPU
             coreutils
             sbctl # Secure Boot keys, enrolled here when the firmware is in Setup Mode
-            sops # secrets.yaml: can the carried-over host key decrypt it?
+            sops # secrets.yaml: can the carried-over host key decrypt it? (the home backup's login)
+            restic # restore /home from the homelab backup
+            _1password-cli # `op`: the home backup's login when the secrets can't be read yet
           ]);
 
           # Same sbctl key paths as lanzaboote on the installed system
