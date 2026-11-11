@@ -96,7 +96,9 @@ in
       '';
 
       home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" "t3ServiceEnv" ] ''
+        # The switch runs without your session's bus; T3's installer needs it.
         export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
         unit=${config.xdg.configHome}/systemd/user/t3code.service
         # The app's own `t3` from before T3CODE_INSTALL_BIN_DIR: it shadows ours.
         shim=${config.home.homeDirectory}/.local/bin/t3
