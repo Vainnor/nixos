@@ -108,12 +108,12 @@ in
             unit=$HOME/.config/systemd/user/t3code.service
             # The app's own `t3` from before T3CODE_INSTALL_BIN_DIR: it shadows ours.
             shim=$HOME/.local/bin/t3
-            if [ -f "$shim" ] && grep -q "Written by T3 Code" "$shim"; then rm -f "$shim"; fi
+            if [ -f "$shim" ] && ${pkgs.gnugrep}/bin/grep -q "Written by T3 Code" "$shim"; then ${pkgs.coreutils}/bin/rm -f "$shim"; fi
             if [ ! -f "$unit" ] || [ ! -e "$HOME/.t3/runtime/versions/${version}/.install-complete" ]; then
               ${t3-cli}/bin/t3 service install
             fi
-            systemctl --user daemon-reload
-            systemctl --user enable --now t3code.service
+            ${pkgs.systemd}/bin/systemctl --user daemon-reload
+            ${pkgs.systemd}/bin/systemctl --user enable --now t3code.service
           ''}";
         };
         Install.WantedBy = [ "default.target" ];
