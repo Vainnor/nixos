@@ -20,7 +20,7 @@ Singleton {
     readonly property string label: !connected ? "offline"
         : (wired ? "eth" : "wifi") + " " + fmtRate(rx) + "↓ " + fmtRate(tx) + "↑"
 
-    // 1234567 -> "1.2m", 34000 -> " 33k", fixed width so the bar doesn't jitter.
+    // 1234567 -> "1.2m", 34000 -> " 33k" (at most 4 characters), fixed width so the bar doesn't jitter.
     function fmtRate(b) {
         let v = b, u = "b";
         for (const next of ["k", "m", "g"]) {
@@ -28,7 +28,7 @@ Singleton {
             v /= 1024; u = next;
         }
         const n = v < 10 && u !== "b" ? v.toFixed(1) : Math.round(v).toString();
-        return (n + u).padStart(5, " ");
+        return (n + u).padStart(4, " ");
     }
 
     property real lastRx: -1
