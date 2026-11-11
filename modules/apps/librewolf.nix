@@ -8,10 +8,11 @@
 #
 # Sidebery's own setup comes from the Mac too (assets/librewolf/sidebery.json:
 # settings, the seven colour panels and their containers; sidebery.css.in: its
-# style, accent from the theme). LibreWolf loads it into Sidebery the first time
-# Sidebery starts in a profile; after that Sidebery keeps its own copy, so to
-# re-apply: Sidebery settings > Help > Import addon data, and pick
-# assets/librewolf/sidebery.json.
+# style, accent from the theme). LibreWolf only loads it into an empty Sidebery,
+# so a switch that changes it empties Sidebery's store (with LibreWolf closed;
+# otherwise it waits for the next switch). Your tabs stay, but they all land in
+# the first panel again, so it only happens when the setup itself changed.
+# Changes made in Sidebery's own settings are lost then: put them in the JSON.
 { config, lib, ... }:
 let
   inherit (config) meta;
@@ -94,8 +95,17 @@ let
 in
 {
   flake.modules.homeManager.desktop =
-    { config, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
+      sideberySettings = sideberyData // {
+        sidebarCSS = sideberyCSS config.lib.stylix.colors;
+      };
+      sideberyHash = builtins.hashString "sha256" (builtins.toJSON sideberySettings);
       look = {
         inherit userChrome;
         userContent = userContent config.lib.stylix.colors;
@@ -103,9 +113,7 @@ in
         containersForce = true;
         extensions = {
           force = true; # storage.js below is ours
-          settings.${sidebery}.settings = sideberyData // {
-            sidebarCSS = sideberyCSS config.lib.stylix.colors;
-          };
+          settings.${sidebery}.settings = sideberySettings;
         };
       };
     in
@@ -116,6 +124,10 @@ in
           "privacy.resistFingerprinting" = true;
           "privacy.clearOnShutdown.history" = false;
           "privacy.clearOnShutdown.downloads" = false;
+          # Keep cookies and logins across restarts, as on the Mac (i2p clears).
+          "privacy.sanitize.sanitizeOnShutdown" = false;
+          # Load the Nix-written Sidebery setup into an emptied store.
+          "extensions.webextensions.ExtensionStorageIDB.migrated.${sidebery}" = false;
           "webgl.disabled" = false;
           "media.ffmpeg.vaapi.enabled" = true; # hardware video decode (any VA-API driver, see system/gpu.nix)
 
@@ -153,10 +165,31 @@ in
               "network.proxy.allow_hijacking_localhost" = true;
               "media.peerconnection.enabled" = false; # no WebRTC IP leaks
               "browser.startup.homepage" = "http://127.0.0.1:7070";
+              "privacy.sanitize.sanitizeOnShutdown" = true;
             };
           };
         };
       };
+
+      # Empty Sidebery's store when its setup changed, so it loads the new one.
+      # A profile LibreWolf hasn't created yet loads it on its own.
+      home.activation.sideberyReset = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        for prof in ${lib.concatStringsSep " " (lib.attrNames config.programs.librewolf.profiles)}; do
+          dir="${config.home.homeDirectory}/${config.programs.librewolf.profilesPath}/$prof"
+          stamp="$dir/.sidebery-applied"
+          [ -f "$dir/prefs.js" ] || continue
+          [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
+          if ${pkgs.procps}/bin/pgrep -u "$(id -u)" -f '/bin/\.?librewolf' >/dev/null; then
+            echo "LibreWolf is open: Sidebery's new setup goes in on the next switch with it closed" >&2
+            continue
+          fi
+          uuid=$(sed -n 's/.*\\"{3c078156-979c-498b-8990-85f7987dd929}\\":\\"\([0-9a-f-]*\)\\".*/\1/p' "$dir/prefs.js")
+          if [ -n "$uuid" ]; then
+            run rm -rf "$dir/storage/default/moz-extension+++$uuid^userContextId=4294967295"
+          fi
+          run sh -c 'printf "%s\n" "$1" > "$2"' sh ${sideberyHash} "$stamp"
+        done
+      '';
 
       wayland.windowManager.mango.settings.bind = [ "SUPER+SHIFT,b,spawn,librewolf -P i2p --no-remote" ];
     };
