@@ -87,21 +87,6 @@ in
         (lib.hiPrio t3-cli)
       ];
 
-      # The background server listens beyond this machine (T3CODE_LAN), so the
-      # Mac links to it straight over NetBird (http://<arc>:3773), with no T3
-      # Connect tunnel and no Tailscale. Only NetBird reaches it: the firewall
-      # opens 3773 on wt0 alone. T3 keeps its other service settings here.
-      home.activation.t3ServiceEnv = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        f=${serverHome}/service.env
-        run mkdir -p ${serverHome}
-        touch "$f"
-        if grep -q '^T3CODE_LAN=' "$f"; then
-          run ${pkgs.gnused}/bin/sed -i 's/^T3CODE_LAN=.*/T3CODE_LAN=true/' "$f"
-        else
-          run sh -c 'printf "%s\n" T3CODE_LAN=true >> "$1"' sh "$f"
-        fi
-      '';
-
       # Installs T3's background server when it isn't installed at this
       # package's version: a oneshot in your user manager (T3's installer
       # talks to it, which it can't from the switch itself). The switch starts
@@ -126,8 +111,25 @@ in
             if [ ! -f "$unit" ] || [ ! -e "${serverHome}/runtime/versions/${version}/.install-complete" ]; then
               ${t3-cli}/bin/t3 service install
             fi
+            # The server listens beyond this machine (T3CODE_LAN), so the Mac
+            # links to it straight over NetBird (http://<arc>:3773), with no
+            # T3 Connect tunnel and no Tailscale. Only NetBird reaches it: the
+            # firewall opens 3773 on wt0 alone. T3 keeps its other service
+            # settings in the same file; the server reads it when it starts.
+            env=${serverHome}/service.env
+            before=$(${pkgs.coreutils}/bin/cat "$env" 2>/dev/null || true)
+            ${pkgs.coreutils}/bin/mkdir -p ${serverHome}
+            ${pkgs.coreutils}/bin/touch "$env"
+            if ${pkgs.gnugrep}/bin/grep -q '^T3CODE_LAN=' "$env"; then
+              ${pkgs.gnused}/bin/sed -i 's/^T3CODE_LAN=.*/T3CODE_LAN=true/' "$env"
+            else
+              echo T3CODE_LAN=true >> "$env"
+            fi
             ${pkgs.systemd}/bin/systemctl --user daemon-reload
             ${pkgs.systemd}/bin/systemctl --user enable --now t3code.service
+            if [ "$before" != "$(${pkgs.coreutils}/bin/cat "$env")" ]; then
+              ${pkgs.systemd}/bin/systemctl --user restart t3code.service
+            fi
           ''}";
         };
         Install.WantedBy = [ "default.target" ];
