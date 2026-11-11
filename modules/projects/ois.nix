@@ -1,4 +1,4 @@
-# OIS's dev shell: `use flake $HOME/nixos#ois` in ~/Programing/OIS/.envrc
+# OIS's dev shell: `use flake $HOME/nixos#ois` in ~/Programing/ois/.envrc
 # (dev/projects.nix writes it). Kept here rather than in OIS, whose rules leave
 # its branches and commits to you; copy it in as OIS's own flake when you like.
 #

@@ -24,11 +24,11 @@ pub enum Cmd {
         #[arg(long)]
         full: bool,
     },
-    /// git pull the repo (fast-forward only) and list the new commits; works from any folder
+    /// git pull the repo (local commits rebased on top) and list the new commits; works from any folder
     Pull,
     /// Build and switch to the current config (darwin-rebuild on the Mac)
     Switch {
-        /// git pull --ff-only first
+        /// git pull first (rebasing local commits)
         #[arg(long)]
         pull: bool,
     },
@@ -166,7 +166,7 @@ pub fn run(ctx: &Ctx, cmd: Cmd) -> Result<()> {
         Cmd::Pull => pull(ctx),
         Cmd::Switch { pull } => {
             if pull {
-                ctx.run(ctx.cmd("git").args(["pull", "--ff-only"]))?;
+                ctx.run(ctx.cmd("git").args(PULL))?;
             }
             switch(ctx)
         }
@@ -441,10 +441,14 @@ fn is_dirty(ctx: &Ctx) -> Result<bool> {
     Ok(!ctx.output(ctx.cmd("git").args(["status", "--porcelain"]))?.trim().is_empty())
 }
 
+/// Local commits (a wallpaper picked on this machine, say) go on top of what
+/// was pulled instead of stopping the pull; uncommitted edits are kept too.
+const PULL: [&str; 3] = ["pull", "--rebase", "--autostash"];
+
 fn pull(ctx: &Ctx) -> Result<()> {
     let repo = ctx.repo()?.to_path_buf();
     let before = ctx.output(ctx.cmd("git").args(["rev-parse", "HEAD"]))?;
-    ctx.run(ctx.cmd("git").args(["pull", "--ff-only", "--quiet"]))?;
+    ctx.run(ctx.cmd("git").args(PULL).arg("--quiet"))?;
     let after = ctx.output(ctx.cmd("git").args(["rev-parse", "HEAD"]))?;
     if before == after {
         ui::ok(&format!("{} is up to date", repo.display()));
@@ -498,7 +502,7 @@ fn deploy(ctx: &Ctx, boot: bool) -> Result<()> {
     push(ctx)?;
     let action = if boot { "boot" } else { "switch" };
     // Same command as the recipe; it parses in fish (arc's login shell) and sh.
-    let script = format!("cd ~/nixos && git pull --ff-only && nh os {action} .");
+    let script = format!("cd ~/nixos && git pull --rebase --autostash && nh os {action} .");
     ctx.run(Command::new("ssh").arg("-t").arg(ssh_target("arc")?).arg(script))
 }
 

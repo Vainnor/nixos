@@ -3,9 +3,10 @@
 # it through dev/claude.nix's hook), listed in .git/info/exclude so it never
 # reaches the repo. An existing .envrc is left alone.
 #
-# Clone them yourself (they need your GitHub login):
+# On arc they came over from WSL (hosts/arc/wsl-import.nix). Elsewhere, clone
+# them yourself (they need your GitHub login):
 #   gh repo clone Mainline-sim/mainline ~/Programing/Mainline-sim/Mainline -- -b next
-#   gh repo clone VATUSA/OIS ~/Programing/OIS -- -b next
+#   gh repo clone VATUSA/OIS ~/Programing/ois -- -b next
 #   gh repo clone aviodeck/aviodeck ~/Programing/aviodeck
 #   gh repo clone aviodeck/aviodeck-link ~/Programing/aviodeck-link
 # then `vx switch` (or `home-manager switch`) writes the .envrc files. direnv
@@ -30,7 +31,7 @@ in
         # Mainline carries its own flake.nix (on its chore/nix-dev-shell branch
         # until merged); until then the .envrc does nothing.
         "Mainline-sim/Mainline" = "if [ -f flake.nix ]; then use flake; fi";
-        "OIS" = "use flake ${meta.flakePath}#ois";
+        "ois" = "use flake ${meta.flakePath}#ois";
         "aviodeck" = "use flake ${meta.flakePath}#aviodeck";
         "aviodeck-link" = "use flake ${meta.flakePath}#aviodeck-link";
       };
