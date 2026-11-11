@@ -63,6 +63,21 @@ in
     lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
       home.packages = [ t3-desktop ];
 
+      # The background server listens beyond this machine (T3CODE_LAN), so the
+      # Mac links to it straight over NetBird (http://<arc>:3773), with no T3
+      # Connect tunnel and no Tailscale. Only NetBird reaches it: the firewall
+      # opens 3773 on wt0 alone. T3 keeps its other service settings here.
+      home.activation.t3ServiceEnv = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        f=${config.home.homeDirectory}/.t3/service.env
+        run mkdir -p ${config.home.homeDirectory}/.t3
+        touch "$f"
+        if grep -q '^T3CODE_LAN=' "$f"; then
+          run ${pkgs.gnused}/bin/sed -i 's/^T3CODE_LAN=.*/T3CODE_LAN=true/' "$f"
+        else
+          run sh -c 'printf "%s\n" T3CODE_LAN=true >> "$1"' sh "$f"
+        fi
+      '';
+
       home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
         unit=${config.xdg.configHome}/systemd/user/t3code.service
         if [ -f "$unit" ]; then
