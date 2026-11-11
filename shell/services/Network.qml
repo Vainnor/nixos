@@ -4,7 +4,8 @@ import Quickshell
 import Quickshell.Io
 
 // NetworkManager state from nmcli: polled every 5 s and refreshed on
-// `nmcli monitor` events. Wired wins over Wi-Fi.
+// `nmcli monitor` events. Wired wins over Wi-Fi. Download and upload rates
+// (bytes/s) of the device in use, from its kernel counters every 2 s.
 Singleton {
     id: root
 
@@ -13,7 +14,66 @@ Singleton {
     property string device: ""
     property string ssid: ""        // Wi-Fi connection name (usually the SSID)
     property string speed: ""       // link speed of the wired device, e.g. "2.5g"
-    readonly property string label: !connected ? "offline" : (wired ? "eth" : ("wifi " + ssid).trim())
+    property real rx: 0             // download, bytes per second
+    property real tx: 0             // upload, bytes per second
+    // The bar's text: the link kind and its traffic, never the network's name.
+    readonly property string label: !connected ? "offline"
+        : (wired ? "eth" : "wifi") + " " + fmtRate(rx) + "↓ " + fmtRate(tx) + "↑"
+
+    // 1234567 -> "1.2m", 34000 -> " 33k", fixed width so the bar doesn't jitter.
+    function fmtRate(b) {
+        let v = b, u = "b";
+        for (const next of ["k", "m", "g"]) {
+            if (v < 1000) break;
+            v /= 1024; u = next;
+        }
+        const n = v < 10 && u !== "b" ? v.toFixed(1) : Math.round(v).toString();
+        return (n + u).padStart(5, " ");
+    }
+
+    property real lastRx: -1
+    property real lastTx: -1
+    property real lastAt: 0
+    property string countersOf: ""
+
+    function sample() {
+        if (device === "") { rx = 0; tx = 0; lastRx = -1; return; }
+        const r = Number(rxFile.text().trim()), t = Number(txFile.text().trim());
+        const now = Date.now();
+        if (isNaN(r) || isNaN(t)) return;
+        if (countersOf === device && lastRx >= 0 && now > lastAt) {
+            const dt = (now - lastAt) / 1000;
+            rx = Math.max(0, (r - lastRx) / dt);
+            tx = Math.max(0, (t - lastTx) / dt);
+        } else {
+            rx = 0; tx = 0;
+        }
+        countersOf = device;
+        lastRx = r; lastTx = t; lastAt = now;
+    }
+
+    // Read in place on each tick (blockLoading), so both counters are current.
+    FileView {
+        id: rxFile
+        blockLoading: true
+        path: root.device === "" ? "" : "/sys/class/net/" + root.device + "/statistics/rx_bytes"
+    }
+    FileView {
+        id: txFile
+        blockLoading: true
+        path: root.device === "" ? "" : "/sys/class/net/" + root.device + "/statistics/tx_bytes"
+    }
+
+    Timer {
+        interval: 2000
+        running: true
+        repeat: true
+        onTriggered: {
+            rxFile.reload();
+            txFile.reload();
+            root.sample();
+        }
+    }
 
     // Split one `nmcli -t` line on unescaped colons.
     function fields(line) {

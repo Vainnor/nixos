@@ -172,7 +172,7 @@ PanelWindow {
             }
 
             BarModule {
-                text: "mem " + Math.round(SysStats.mem) + "%"
+                text: "mem " + SysStats.memGb.toFixed(1) + "g"
                 interactive: false
             }
 

@@ -3,12 +3,13 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// CPU and memory usage (percent, 0..100) and uptime, polled from /proc.
+// CPU usage (percent, 0..100), memory in use (GiB) and uptime, polled from /proc.
 Singleton {
     id: root
 
     property real cpu: 0
-    property real mem: 0
+    property real mem: 0      // percent in use
+    property real memGb: 0    // GiB in use (total minus available)
     property string uptime: ""
 
     property real lastTotal: 0
@@ -51,7 +52,10 @@ Singleton {
             const t = text();
             const total = Number((t.match(/MemTotal:\s+(\d+)/) ?? [])[1] ?? 0);
             const avail = Number((t.match(/MemAvailable:\s+(\d+)/) ?? [])[1] ?? 0);
-            if (total > 0) root.mem = (1 - avail / total) * 100;
+            if (total > 0) {
+                root.mem = (1 - avail / total) * 100;
+                root.memGb = (total - avail) / 1048576;
+            }
         }
     }
 

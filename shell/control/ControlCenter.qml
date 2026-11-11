@@ -44,7 +44,7 @@ Overlay {
             Tile {
                 Layout.fillWidth: true
                 title: "network"
-                subtitle: !Network.connected ? "offline" : (Network.wired ? ("wired" + (Network.speed !== "" ? " · " + Network.speed : "")) : ("wifi " + Network.ssid))
+                subtitle: !Network.connected ? "offline" : (Network.wired ? ("wired" + (Network.speed !== "" ? " · " + Network.speed : "")) : "wifi")
                 active: Network.connected
                 onClicked: root.run(["nm-connection-editor"])
             }
