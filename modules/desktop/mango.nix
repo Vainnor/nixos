@@ -103,6 +103,7 @@
             "SUPER,n,switch_layout"
             "SUPER,o,toggleoverview,"
             "SUPER,z,toggle_scratchpad"
+            "SUPER+SHIFT,m,restore_minimized" # bring back a minimized window
 
             # Monitors
             "SUPER,comma,focusmon,left"
