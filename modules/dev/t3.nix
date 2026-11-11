@@ -2,8 +2,8 @@
 # Reachable over NetBird only: the firewall opens 3773 on wt0 alone, and the
 # NetBird policy decides which peers get there.
 #
-# Nothing to set up by hand: each switch runs `t3 service install` when the
-# background server isn't installed at this package's version, which writes
+# Nothing to set up by hand: t3-install (below) runs `t3 service install` when
+# the background server isn't installed at this package's version, which writes
 # T3's own user unit (~/.config/systemd/user/t3code.service, ExecStart under
 # ~/.t3/runtime), then makes sure it's enabled and running. Nix adds a drop-in
 # with what the unit can't know here: the PATH to the user's tools (git, nix,
@@ -95,24 +95,29 @@ in
         fi
       '';
 
-      home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" "t3ServiceEnv" ] ''
-        # The switch runs without your session's bus; T3's installer needs it.
-        export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-        export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
-        unit=${config.xdg.configHome}/systemd/user/t3code.service
-        # The app's own `t3` from before T3CODE_INSTALL_BIN_DIR: it shadows ours.
-        shim=${config.home.homeDirectory}/.local/bin/t3
-        if [ -f "$shim" ] && grep -q "Written by T3 Code" "$shim"; then
-          run rm -f "$shim"
-        fi
-        if [ ! -f "$unit" ] || [ ! -e ${config.home.homeDirectory}/.t3/runtime/versions/${version}/.install-complete ]; then
-          run ${t3-cli}/bin/t3 service install || echo "t3 service install failed; see ~/.t3/userdata/logs" >&2
-        fi
-        if [ -f "$unit" ]; then
-          run ${pkgs.systemd}/bin/systemctl --user daemon-reload || true
-          run ${pkgs.systemd}/bin/systemctl --user enable --now t3code.service || true
-        fi
-      '';
+      # Installs T3's background server when it isn't installed at this
+      # package's version: a oneshot in your user manager (T3's installer
+      # talks to it, which it can't from the switch itself). The switch starts
+      # it when it changes, i.e. with each new T3 version; it also runs at boot.
+      systemd.user.services.t3-install = {
+        Unit.Description = "Install T3 Code's background server for this version";
+        Service = {
+          Type = "oneshot";
+          Environment = [ "T3CODE_HOME=%h/.t3" ];
+          ExecStart = "${pkgs.writeShellScript "t3-install" ''
+            unit=$HOME/.config/systemd/user/t3code.service
+            # The app's own `t3` from before T3CODE_INSTALL_BIN_DIR: it shadows ours.
+            shim=$HOME/.local/bin/t3
+            if [ -f "$shim" ] && grep -q "Written by T3 Code" "$shim"; then rm -f "$shim"; fi
+            if [ ! -f "$unit" ] || [ ! -e "$HOME/.t3/runtime/versions/${version}/.install-complete" ]; then
+              ${t3-cli}/bin/t3 service install
+            fi
+            systemctl --user daemon-reload
+            systemctl --user enable --now t3code.service
+          ''}";
+        };
+        Install.WantedBy = [ "default.target" ];
+      };
 
       xdg.configFile."systemd/user/t3code.service.d/nix.conf".text = ''
         [Service]
