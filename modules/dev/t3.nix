@@ -9,6 +9,9 @@
 # direnv, claude) and the 1Password SSH agent. Its binaries run through nix-ld
 # (dev/tooling.nix). Once T3 has installed its unit, each switch makes sure it's
 # enabled and running.
+#
+# The desktop app is T3's AppImage from its releases, pinned here (its own
+# updater can't replace a store path): bump version and hash to update.
 { config, ... }:
 let
   inherit (config) meta;
@@ -27,7 +30,33 @@ in
       pkgs,
       ...
     }:
+    let
+      version = "0.1.8";
+      src = pkgs.fetchurl {
+        url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
+        hash = "sha256-4Rdpi+TMWeXsFBbFHf1EKlPvoxQZd7wgy9DYH9P9WCQ=";
+      };
+      contents = pkgs.appimageTools.extract {
+        pname = "t3-code";
+        inherit version src;
+      };
+      t3-desktop = pkgs.appimageTools.wrapType2 {
+        pname = "t3-code";
+        inherit version src;
+        # The launcher entry and icon from inside the AppImage.
+        extraInstallCommands = ''
+          desktop=$(find ${contents} -maxdepth 1 -name '*.desktop' | head -n1)
+          install -Dm644 "$desktop" $out/share/applications/t3-code.desktop
+          sed -i 's|^Exec=[^ ]*|Exec=t3-code|' $out/share/applications/t3-code.desktop
+          if [ -d ${contents}/usr/share/icons ]; then
+            cp -r ${contents}/usr/share/icons $out/share/
+          fi
+        '';
+      };
+    in
     lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
+      home.packages = [ t3-desktop ];
+
       home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
         unit=${config.xdg.configHome}/systemd/user/t3code.service
         if [ -f "$unit" ]; then
