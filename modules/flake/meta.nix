@@ -88,7 +88,7 @@
     # yet (a new disk: no carried host key). Fields: repository, password,
     # rest_username, rest_password (the same values as restic/*). The login is
     # read on the installer and never written to the repo. null = don't offer 1Password.
-    restoreItem = "op://Private/arc restic";
+    restoreItem = "op://Personal/arc restic";
 
     # Homelab binary cache (Attic). null = off. Fill in from the homelab, e.g.
     #   { endpoint = "https://cache.lab.vainnor.com"; cache = "nixos";

@@ -18,7 +18,7 @@
 #      snapshot before the first boot ("restore /home from the homelab
 #      backup", fresh /home only). Its login comes from restic/* when the
 #      carried host key decrypts them, else from the 1Password item
-#      meta.restoreItem (default "op://Private/arc restic"; fields repository,
+#      meta.restoreItem (default "op://Personal/arc restic"; fields repository,
 #      password, rest_username, rest_password: the same values), else typed.
 #      Later, on the system: `vx restore --restic <path>`.
 #
