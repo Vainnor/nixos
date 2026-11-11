@@ -83,6 +83,7 @@
         "teamspeak-client"
         # Productivity
         "1password"
+        "1password-cli" # `op`; turn on Settings > Developer > Integrate with 1Password CLI
         "raycast"
         "fantastical"
         "affine"
