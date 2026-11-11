@@ -37,7 +37,8 @@
 # once in Settings > Appearance (or `vx obs reset`).
 #
 # The Twitch stream key and StreamElements token come from sops
-# (secrets/secrets.yaml) once meta.secretsReady is on.
+# (secrets/secrets.yaml) once meta.secretsReady is on; left empty there, OBS
+# and the overlays just go without them.
 # Still yours to do in OBS: connect the Twitch account for VOD track (Settings > Stream),
 # pick the Brio in "Webcam" if it isn't picked, and launch games with
 # `obs-gamecapture %command%` in Steam so "Game Capture" sees them.
@@ -619,7 +620,8 @@ in
           chmod 0600 "${wsConfig}"
         fi
 
-        secret() { if [ -r "/run/secrets/$1" ]; then cat "/run/secrets/$1"; fi; }
+        # An empty secret counts as not set (secrets.yaml keeps unused ones blank).
+        secret() { if [ -s "/run/secrets/$1" ]; then cat "/run/secrets/$1"; fi; }
 
         # Overlay settings: rebuilt every switch from overlaySettings + secrets.
         cfg="$HOME/.local/share/vainnor-overlays/js/config.js"
@@ -635,7 +637,7 @@ in
 
         # Twitch stream key from sops, seeded into the profile once.
         svc="${obsDir}/basic/profiles/Vainnor/service.json"
-        if [ ! -e "$svc" ] && [ -r /run/secrets/twitch/stream_key ]; then
+        if [ ! -e "$svc" ] && [ -s /run/secrets/twitch/stream_key ]; then
           ${jq} -n --arg key "$(secret twitch/stream_key)" \
             '{type: "rtmp_common", settings: {service: "Twitch", server: "auto", key: $key, bwtest: false}}' > "$svc"
           chmod 0600 "$svc"
