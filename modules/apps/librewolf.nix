@@ -106,6 +106,23 @@ in
         sidebarCSS = sideberyCSS config.lib.stylix.colors;
       };
       sideberyHash = builtins.hashString "sha256" (builtins.toJSON sideberySettings);
+      sideberyApply = pkgs.writeShellScript "sidebery-apply" ''
+        for prof in ${lib.concatStringsSep " " (lib.attrNames config.programs.librewolf.profiles)}; do
+          dir="${config.home.homeDirectory}/${config.programs.librewolf.profilesPath}/$prof"
+          stamp="$dir/.sidebery-applied"
+          [ -f "$dir/prefs.js" ] || continue
+          [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
+          if ${pkgs.procps}/bin/pgrep -u "$(id -u)" -f '/bin/\.?librewolf' >/dev/null; then
+            echo "LibreWolf is open: Sidebery's new setup goes in at the next login or switch with it closed" >&2
+            continue
+          fi
+          uuid=$(${pkgs.gnused}/bin/sed -n 's/.*\\"{3c078156-979c-498b-8990-85f7987dd929}\\":\\"\([0-9a-f-]*\)\\".*/\1/p' "$dir/prefs.js")
+          if [ -n "$uuid" ]; then
+            rm -rf "$dir/storage/default/moz-extension+++$uuid^userContextId=4294967295"
+          fi
+          printf "%s\n" ${sideberyHash} > "$stamp"
+        done
+      '';
       look = {
         inherit userChrome;
         userContent = userContent config.lib.stylix.colors;
@@ -172,24 +189,20 @@ in
       };
 
       # Empty Sidebery's store when its setup changed, so it loads the new one.
-      # A profile LibreWolf hasn't created yet loads it on its own.
+      # A profile LibreWolf hasn't created yet loads it on its own. Runs on
+      # each switch and at login, so one skipped while LibreWolf was open
+      # goes in at the next login.
       home.activation.sideberyReset = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        for prof in ${lib.concatStringsSep " " (lib.attrNames config.programs.librewolf.profiles)}; do
-          dir="${config.home.homeDirectory}/${config.programs.librewolf.profilesPath}/$prof"
-          stamp="$dir/.sidebery-applied"
-          [ -f "$dir/prefs.js" ] || continue
-          [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
-          if ${pkgs.procps}/bin/pgrep -u "$(id -u)" -f '/bin/\.?librewolf' >/dev/null; then
-            echo "LibreWolf is open: Sidebery's new setup goes in on the next switch with it closed" >&2
-            continue
-          fi
-          uuid=$(sed -n 's/.*\\"{3c078156-979c-498b-8990-85f7987dd929}\\":\\"\([0-9a-f-]*\)\\".*/\1/p' "$dir/prefs.js")
-          if [ -n "$uuid" ]; then
-            run rm -rf "$dir/storage/default/moz-extension+++$uuid^userContextId=4294967295"
-          fi
-          run sh -c 'printf "%s\n" "$1" > "$2"' sh ${sideberyHash} "$stamp"
-        done
+        run ${sideberyApply}
       '';
+      systemd.user.services.sidebery-apply = {
+        Unit.Description = "Load the Nix-written Sidebery setup into LibreWolf";
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${sideberyApply}";
+        };
+        Install.WantedBy = [ "default.target" ];
+      };
 
       wayland.windowManager.mango.settings.bind = [ "SUPER+SHIFT,b,spawn,librewolf -P i2p --no-remote" ];
     };

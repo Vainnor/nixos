@@ -45,6 +45,12 @@ in
         inherit version src;
         # The launcher entry and icon from inside the AppImage.
         extraInstallCommands = ''
+          # An AppImage's Electron doesn't follow NIXOS_OZONE_WL: without this
+          # it looks for an X server and exits.
+          source ${pkgs.makeWrapper}/nix-support/setup-hook
+          wrapProgram $out/bin/t3-code \
+            --add-flags "--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime"
+
           desktop=$(find ${contents} -maxdepth 1 -name '*.desktop' | head -n1)
           install -Dm644 "$desktop" $out/share/applications/t3-code.desktop
           sed -i 's|^Exec=[^ ]*|Exec=t3-code|' $out/share/applications/t3-code.desktop
