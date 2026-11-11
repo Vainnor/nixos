@@ -367,6 +367,8 @@ in
           default = look // {
             id = 0;
             isDefault = true;
+            # Reopen the last session's windows and tabs at every start.
+            settings."browser.startup.page" = 3;
           };
           i2p = look // {
             id = 1;
