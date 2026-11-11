@@ -213,27 +213,25 @@ mod tests {
     const K1: &str = "age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq";
     const K2: &str = "age1zvkyg2lqzraa2lnjvqej32nkuu0ues2s82hzrye869xeexvn73equnujwj";
 
-    /// The repo's .sops.yaml (tests run from tools/vx), else the copy above.
+    /// The pristine template (mac only, arc commented out). The repo's own
+    /// .sops.yaml gains hosts over time, so the edit tests don't use it.
     fn real() -> String {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.sops.yaml");
-        std::fs::read_to_string(p).unwrap_or_else(|_| SAMPLE.to_string())
-    }
-
-    #[test]
-    fn sample_matches_the_real_file() {
-        // Catches the copy drifting from the repo (skipped where the repo isn't there).
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.sops.yaml");
-        if let Ok(s) = std::fs::read_to_string(p) {
-            assert_eq!(recipients(&s), recipients(SAMPLE), "update sops::SAMPLE from .sops.yaml");
-        }
+        SAMPLE.to_string()
     }
 
     #[test]
     fn reads_the_real_file() {
-        let r = recipients(&real());
+        // The repo's .sops.yaml parses, and the Mac (which edits secrets) is in it
+        // (skipped where the repo isn't there).
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.sops.yaml");
+        if let Ok(s) = std::fs::read_to_string(p) {
+            let r = recipients(&s);
+            assert!(r.iter().any(|(n, k)| n == "mac" && is_age_key(k)), "{r:?}");
+            assert!(r.iter().all(|(_, k)| is_age_key(k)), "{r:?}");
+        }
+        let r = recipients(SAMPLE);
         assert_eq!(r.len(), 1, "{r:?}");
         assert_eq!(r[0].0, "mac");
-        assert!(is_age_key(&r[0].1));
     }
 
     #[test]

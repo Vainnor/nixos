@@ -369,8 +369,11 @@ mod tests {
         assert!(!out.contains("op://"), "the owner's 1password item isn't the fork's");
         let without: String = meta.lines().filter(|l| !l.contains("restoreItem")).map(|l| format!("{l}\n")).collect();
         assert!(!personalise_meta(&without, &personal()).unwrap().contains("restoreItem"));
-        let with_item = without
-            .replace("    resticReady = false;\n", "    resticReady = false;\n    restoreItem = \"op://Private/arc restic\";\n");
+        let with_item = without.replacen(
+            "    binaryCache =",
+            "    restoreItem = \"op://Private/arc restic\";\n    binaryCache =",
+            1,
+        );
         let out2 = personalise_meta(&with_item, &personal()).unwrap();
         assert!(out2.contains("    restoreItem = null;\n"), "the owner's 1password item isn't the fork's");
         // No keys on GitHub: an empty list.
