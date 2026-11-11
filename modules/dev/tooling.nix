@@ -88,7 +88,12 @@ in
           opentofu
           ansible
         ]
-        # quick experiments; real projects use the flake template. The Mac has its own rustup.
-        ++ lib.optional isLinux rustup;
+        ++ lib.optionals isLinux [
+          # quick experiments; real projects use the flake template. The Mac has its own rustup.
+          rustup
+          # Outside any dev shell too: repo hooks (Mainline's Claude Code hooks)
+          # run before a session's direnv environment applies. The Mac has /usr/bin/python3.
+          python3
+        ];
     };
 }

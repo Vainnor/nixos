@@ -7,7 +7,8 @@
 # The Rust toolchain is rustup's (rust-toolchain.toml), so builds match the
 # repo's pin. The native libraries are the ones the Linux CI image installs
 # (Bevy's audio, input, Wayland and keyboard maps), plus the Vulkan and X11
-# libraries Bevy opens at runtime.
+# libraries Bevy opens at runtime. Docker for `just ci-linux` is the system's
+# rootless Docker (dev/containers.nix), not part of the shell.
 {
   perSystem =
     { pkgs, lib, ... }:

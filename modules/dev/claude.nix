@@ -72,16 +72,20 @@
 
       # T3 Code's provider instances, merged into its settings (its other
       # settings are T3's own and stay as they are).
+      # Both T3 homes: the desktop app's (~/.t3) and the background server's
+      # (~/.t3-server, dev/t3.nix), which reads it when it starts.
       home.activation.t3ProviderInstances = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        f=${home}/.t3/userdata/settings.json
-        run mkdir -p ${home}/.t3/userdata
-        [ -s "$f" ] || echo '{}' > "$f"
-        tmp=$(mktemp)
-        ${jq} --arg max "${home}/.claude-max" '
-          .providerInstances = ((.providerInstances // {}) + {
-            "claudeAgent": {"driver": "claudeAgent", "displayName": "Claude Ultra", "enabled": true, "config": {}},
-            "claudeAgent_max": {"driver": "claudeAgent", "displayName": "Claude Max", "enabled": true, "config": {"homePath": $max}}
-          })' "$f" > "$tmp" && run mv "$tmp" "$f"
+        for t3home in ${home}/.t3 ${home}/.t3-server; do
+          f=$t3home/userdata/settings.json
+          run mkdir -p $t3home/userdata
+          [ -s "$f" ] || echo '{}' > "$f"
+          tmp=$(mktemp)
+          ${jq} --arg max "${home}/.claude-max" '
+            .providerInstances = ((.providerInstances // {}) + {
+              "claudeAgent": {"driver": "claudeAgent", "displayName": "Claude Ultra", "enabled": true, "config": {}},
+              "claudeAgent_max": {"driver": "claudeAgent", "displayName": "Claude Max", "enabled": true, "config": {"homePath": $max}}
+            })' "$f" > "$tmp" && run mv "$tmp" "$f"
+        done
       '';
 
       home.sessionVariables.CLAUDE_CODE_DISABLE_AUTOUPDATER = "1"; # Nix updates it
