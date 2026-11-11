@@ -26,21 +26,32 @@ in
     };
   };
 
-  flake.modules.homeManager.desktop = {
-    programs.ssh = {
-      enable = true;
-      enableDefaultConfig = false;
-      settings."*".IdentityAgent = "~/.1password/agent.sock";
-    };
-    home.sessionVariables.SSH_AUTH_SOCK = "$HOME/.1password/agent.sock";
+  flake.modules.homeManager.desktop =
+    { config, lib, ... }:
+    {
+      programs.ssh = {
+        enable = true;
+        enableDefaultConfig = false;
+        settings."*".IdentityAgent = "~/.1password/agent.sock";
+      };
+      # ~/.ssh/config is a real file you own (mode 600), not a link into
+      # /nix/store: in the T3 app's sandbox (its own user namespace) store files
+      # show as nobody's, and OpenSSH refuses a config it doesn't see you own.
+      home.file.".ssh/config".enable = lib.mkForce false;
+      home.activation.sshConfig = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+        run mkdir -p ${config.home.homeDirectory}/.ssh
+        run rm -f ${config.home.homeDirectory}/.ssh/config
+        run install -m 600 ${config.home.file.".ssh/config".source} ${config.home.homeDirectory}/.ssh/config
+      '';
+      home.sessionVariables.SSH_AUTH_SOCK = "$HOME/.1password/agent.sock";
 
-    wayland.windowManager.mango.autostart_sh = ''
-      1password --silent &
-    '';
+      wayland.windowManager.mango.autostart_sh = ''
+        1password --silent &
+      '';
 
-    programs.librewolf.policies.ExtensionSettings."{d634138d-c276-4fc8-924b-40a0ea21d284}" = {
-      install_url = "https://addons.mozilla.org/firefox/downloads/latest/1password-x-password-manager/latest.xpi";
-      installation_mode = "force_installed";
+      programs.librewolf.policies.ExtensionSettings."{d634138d-c276-4fc8-924b-40a0ea21d284}" = {
+        install_url = "https://addons.mozilla.org/firefox/downloads/latest/1password-x-password-manager/latest.xpi";
+        installation_mode = "force_installed";
+      };
     };
-  };
 }
