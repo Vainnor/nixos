@@ -5,7 +5,9 @@ import Quickshell.Io
 
 // NetworkManager state from nmcli: polled every 5 s and refreshed on
 // `nmcli monitor` events. Wired wins over Wi-Fi. Download and upload rates
-// (bytes/s) of the device in use, from its kernel counters every 2 s.
+// (bytes/s) of the device in use, from its kernel counters every 2 s, with
+// the last minute of them for the net dropdown. That dropdown calls detail()
+// while open for addresses and Wi-Fi signal.
 Singleton {
     id: root
 
@@ -16,6 +18,14 @@ Singleton {
     property string speed: ""       // link speed of the wired device, e.g. "2.5g"
     property real rx: 0             // download, bytes per second
     property real tx: 0             // upload, bytes per second
+    property real rxTotal: 0        // bytes received by the device since it came up
+    property real txTotal: 0
+    property var history: []        // last 30 samples (60 s), oldest first: [{ rx, tx }]
+
+    // ---- detail, only refreshed by detail()
+    property var addrs: []          // [{ dev, addr }] IPv4 of the device in use, then wt0 (NetBird)
+    property int signal: -1         // Wi-Fi link quality, percent; -1 = unknown
+    property int signalDbm: 0
     // The bar's text: the link kind and its traffic, never the network's name.
     readonly property string label: !connected ? "offline"
         : (wired ? "eth" : "wifi") + " " + fmtRate(rx) + "↓ " + fmtRate(tx) + "↑"
@@ -29,6 +39,16 @@ Singleton {
         }
         const n = v < 10 && u !== "b" ? v.toFixed(1) : Math.round(v).toString();
         return (n + u).padStart(4, " ");
+    }
+
+    // 12345678901 -> "11.5g", 52428800 -> "50.0m"
+    function fmtBytes(b) {
+        let v = b, u = "b";
+        for (const next of ["k", "m", "g", "t"]) {
+            if (v < 1024) break;
+            v /= 1024; u = next;
+        }
+        return (u === "b" ? Math.round(v).toString() : v.toFixed(1)) + u;
     }
 
     property real lastRx: -1
@@ -50,6 +70,39 @@ Singleton {
         }
         countersOf = device;
         lastRx = r; lastTx = t; lastAt = now;
+        rxTotal = r; txTotal = t;
+        history = history.concat([{ rx: rx, tx: tx }]).slice(-30);
+    }
+
+    function detail() {
+        if (!detailProc.running) detailProc.running = true;
+    }
+
+    // "4: wlp15s0    inet 100.70.21.135/25 brd ..." and the /proc/net/wireless table
+    // ("wlp15s0: 0000   54.  -56.  -256 ..."): quality out of 70, level in dBm.
+    Process {
+        id: detailProc
+        command: ["sh", "-c", "ip -4 -o addr show 2>/dev/null; cat /proc/net/wireless 2>/dev/null"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const mine = [], wt = [];
+                let q = -1, dbm = 0;
+                for (const line of text.split("\n")) {
+                    const f = line.trim().split(/\s+/);
+                    if (f[2] === "inet") {
+                        const a = { dev: f[1], addr: f[3].split("/")[0] };
+                        if (f[1] === root.device) mine.push(a);
+                        else if (f[1] === "wt0") wt.push(a);
+                    } else if (f[0] === root.device + ":" && f.length > 3) {
+                        q = Math.round(parseFloat(f[2]) / 70 * 100);
+                        dbm = Math.round(parseFloat(f[3]));
+                    }
+                }
+                root.addrs = mine.concat(wt);
+                root.signal = root.wired || isNaN(q) ? -1 : Math.max(0, Math.min(100, q));
+                root.signalDbm = isNaN(dbm) ? 0 : dbm;
+            }
+        }
     }
 
     // Read in place on each tick (blockLoading), so both counters are current.

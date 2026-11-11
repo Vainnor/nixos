@@ -23,10 +23,13 @@ PanelWindow {
     WlrLayershell.namespace: "vshell-bar"
     WlrLayershell.layer: WlrLayer.Top
 
-    // Open a panel on the screen whose bar was clicked.
-    function toggle(name) {
+    // Open a panel on the screen whose bar was clicked; a dropdown hangs
+    // under `item`, the module that opened it.
+    function toggle(name, item) {
         Panels.toggle(name);
-        if (Panels.open === name) Panels.screen = root.screen;
+        if (Panels.open !== name) return;
+        Panels.screen = root.screen;
+        Panels.anchorX = item ? item.mapToItem(null, item.width / 2, 0).x : -1;
     }
 
     // Next/previous tag on this monitor, wrapping 1..9.
@@ -37,10 +40,22 @@ PanelWindow {
         Mango.view(next, root.monitor);
     }
 
-    // One calendar overlay for the whole shell (it follows Panels.screen).
+    // One calendar and one of each dropdown for the whole shell (they follow Panels.screen).
     LazyLoader {
         active: root.screen === Panels.primary()
         Calendar {}
+    }
+    LazyLoader {
+        active: root.screen === Panels.primary()
+        NetDropdown {}
+    }
+    LazyLoader {
+        active: root.screen === Panels.primary()
+        CpuDropdown {}
+    }
+    LazyLoader {
+        active: root.screen === Panels.primary()
+        MemDropdown {}
     }
 
     SystemClock {
@@ -161,19 +176,22 @@ PanelWindow {
             }
 
             BarModule {
+                id: netModule
                 text: Network.label
                 textColor: Network.connected ? Theme.text : Theme.red
-                onClicked: root.toggle("control")
+                onClicked: root.toggle("net", netModule)
             }
 
             BarModule {
+                id: cpuModule
                 text: "cpu " + Math.round(SysStats.cpu) + "%"
-                interactive: false
+                onClicked: root.toggle("cpu", cpuModule)
             }
 
             BarModule {
+                id: memModule
                 text: "mem " + SysStats.memGb.toFixed(1) + "g"
-                interactive: false
+                onClicked: root.toggle("mem", memModule)
             }
 
             BarModule {
