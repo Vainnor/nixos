@@ -5,6 +5,13 @@
 # Same look as the Mac: tabs live in Sidebery (vertical, in the sidebar), the
 # tab strip and sidebar header are hidden, every corner is square, and the
 # about: pages use the system palette (assets/librewolf).
+#
+# Sidebery's own setup comes from the Mac too (assets/librewolf/sidebery.json:
+# settings, the seven colour panels and their containers; sidebery.css.in: its
+# style, accent from the theme). LibreWolf loads it into Sidebery the first time
+# Sidebery starts in a profile; after that Sidebery keeps its own copy, so to
+# re-apply: Sidebery settings > Help > Import addon data, and pick
+# assets/librewolf/sidebery.json.
 { config, lib, ... }:
 let
   inherit (config) meta;
@@ -51,6 +58,35 @@ let
     in
     builtins.replaceStrings keys vals (builtins.readFile ../../assets/librewolf/userContent.css.in);
 
+  sideberyData = builtins.fromJSON (builtins.readFile ../../assets/librewolf/sidebery.json);
+  sideberyCSS =
+    c:
+    builtins.replaceStrings [ "@base0D@" ] [ c.base0D ] (
+      builtins.readFile ../../assets/librewolf/sidebery.css.in
+    );
+
+  # The containers Sidebery's panels open tabs in (newTabCtx), at the Mac's ids.
+  containers = lib.listToAttrs (
+    lib.imap0
+      (i: name: {
+        inherit name;
+        value = {
+          id = 6 + i;
+          color = lib.toLower name;
+          icon = "circle";
+        };
+      })
+      [
+        "Red"
+        "Orange"
+        "Yellow"
+        "Green"
+        "Blue"
+        "Purple"
+        "Pink"
+      ]
+  );
+
   amo = slug: {
     install_url = "https://addons.mozilla.org/firefox/downloads/latest/${slug}/latest.xpi";
     installation_mode = "force_installed";
@@ -63,6 +99,14 @@ in
       look = {
         inherit userChrome;
         userContent = userContent config.lib.stylix.colors;
+        inherit containers;
+        containersForce = true;
+        extensions = {
+          force = true; # storage.js below is ours
+          settings.${sidebery}.settings = sideberyData // {
+            sidebarCSS = sideberyCSS config.lib.stylix.colors;
+          };
+        };
       };
     in
     {
