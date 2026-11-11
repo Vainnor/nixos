@@ -19,6 +19,7 @@
           just
           cargo-nextest
           cargo-deny
+          sccache # on PATH; opt in with RUSTC_WRAPPER=sccache
           sqlx-cli
           gitleaks
           postgresql_17 # psql, pg_dump
