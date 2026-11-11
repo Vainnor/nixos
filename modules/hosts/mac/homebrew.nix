@@ -79,6 +79,7 @@
         "chatgpt"
         # Chat
         "discord"
+        "moonlight" # remote desktop into the PC (Sunshine, gaming/sunshine.nix)
         "signal"
         "teamspeak-client"
         # Productivity
