@@ -274,7 +274,9 @@ in
       sideberySettings = sideberyData // {
         sidebarCSS = sideberyCSS config.lib.stylix.colors;
       };
-      sideberyHash = builtins.hashString "sha256" (builtins.toJSON sideberySettings);
+      # The "v2" re-applies once, for the reset that also restores storage.js.
+      sideberyHash = builtins.hashString "sha256" ("v2" + builtins.toJSON sideberySettings);
+      sideberyStorage = pkgs.writeText "sidebery-storage.js" (builtins.toJSON sideberySettings);
       sideberyApply = pkgs.writeShellScript "sidebery-apply" ''
         for prof in ${lib.concatStringsSep " " (lib.attrNames config.programs.librewolf.profiles)}; do
           dir="${config.home.homeDirectory}/${config.programs.librewolf.profilesPath}/$prof"
@@ -289,6 +291,14 @@ in
           if [ -n "$uuid" ]; then
             rm -rf "$dir/storage/default/moz-extension+++$uuid^userContextId=4294967295"
           fi
+          # LibreWolf rewrites storage.js with its live state when it closes,
+          # so put the Nix one back, and drop the "already migrated" mark it
+          # saved in prefs.js, so the next start loads it into the empty store.
+          data="$dir/browser-extension-data/${sidebery}"
+          mkdir -p "$data"
+          rm -f "$data/storage.js"
+          install -m644 ${sideberyStorage} "$data/storage.js"
+          ${pkgs.gnused}/bin/sed -i '/ExtensionStorageIDB\.migrated\.{3c078156-979c-498b-8990-85f7987dd929}/d' "$dir/prefs.js"
           printf "%s\n" ${sideberyHash} > "$stamp"
         done
       '';
