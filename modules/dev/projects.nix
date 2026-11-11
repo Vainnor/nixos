@@ -22,12 +22,12 @@ in
       home = config.home.homeDirectory;
       # Folder (under ~/Programing) = its GitHub repo, branch and .envrc.
       projects = {
-        # Mainline carries its own flake.nix (on its chore/nix-dev-shell branch
-        # until merged); until then the .envrc does nothing.
+        # Its shell is projects/mainline.nix until Mainline's own flake.nix
+        # (chore/nix-dev-shell) is merged.
         "Mainline-sim/Mainline" = {
           repo = "Mainline-sim/mainline";
           branch = "next";
-          envrc = "if [ -f flake.nix ]; then use flake; fi";
+          envrc = "use flake ${meta.flakePath}#mainline";
         };
         "OIS" = {
           repo = "VATUSA/OIS";
