@@ -274,9 +274,9 @@ in
       sideberySettings = sideberyData // {
         sidebarCSS = sideberyCSS config.lib.stylix.colors;
       };
-      # Bump the "v3" to re-apply once without a setup change (v3: after the
+      # Bump the "v4" to re-apply once without a setup change (v4: after the
       # permissions grant, since Sidebery had turned the reopen rules off).
-      sideberyHash = builtins.hashString "sha256" ("v3" + builtins.toJSON sideberySettings);
+      sideberyHash = builtins.hashString "sha256" ("v4" + builtins.toJSON sideberySettings);
       sideberyStorage = pkgs.writeText "sidebery-storage.js" (builtins.toJSON sideberySettings);
       sideberyApply = pkgs.writeShellScript "sidebery-apply" ''
         for prof in ${lib.concatStringsSep " " (lib.attrNames config.programs.librewolf.profiles)}; do
@@ -296,8 +296,16 @@ in
             .[$id] = ((.[$id] // {permissions: [], origins: [], data_collection: []})
               | .permissions = ((.permissions + ["proxy", "webRequest", "webRequestBlocking"]) | unique)
               | .origins = ((.origins + ["<all_urls>"]) | unique))
-          ' "$prefs" > "$prefs.tmp" && mv "$prefs.tmp" "$prefs"
+          ' "$prefs" > "$prefs.tmp"
+          if ! cmp -s "$prefs" "$prefs.tmp"; then
+            mv "$prefs.tmp" "$prefs"
+            # LibreWolf reads extension permissions from its startup cache
+            # rather than that file; drop the cache so it rereads them.
+            rm -f "${config.xdg.cacheHome}/librewolf/$prof/startupCache/webext.sc.lz4"
+          fi
+          rm -f "$prefs.tmp"
           [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
+          rm -f "${config.xdg.cacheHome}/librewolf/$prof/startupCache/webext.sc.lz4"
           uuid=$(${pkgs.gnused}/bin/sed -n 's/.*\\"{3c078156-979c-498b-8990-85f7987dd929}\\":\\"\([0-9a-f-]*\)\\".*/\1/p' "$dir/prefs.js")
           if [ -n "$uuid" ]; then
             rm -rf "$dir/storage/default/moz-extension+++$uuid^userContextId=4294967295"
