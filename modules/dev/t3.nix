@@ -2,10 +2,15 @@
 # Reachable over NetBird only: the firewall opens 3773 on wt0 alone, and the
 # NetBird policy decides which peers get there.
 #
+# T3 lets one server own a T3 home, so the background server has its own,
+# ~/.t3-server, and the desktop app keeps ~/.t3: both run at once, each with
+# its own threads (pair the app with the server to see the server's too). The
+# `t3` command works on the server's home.
+#
 # Nothing to set up by hand: t3-install (below) runs `t3 service install` when
 # the background server isn't installed at this package's version, which writes
 # T3's own user unit (~/.config/systemd/user/t3code.service, ExecStart under
-# ~/.t3/runtime), then makes sure it's enabled and running. Nix adds a drop-in
+# ~/.t3-server/runtime), then makes sure it's enabled and running. Nix adds a drop-in
 # with what the unit can't know here: the PATH to the user's tools (git, nix,
 # gh, direnv, claude) and the 1Password SSH agent. Its binaries run through
 # nix-ld (dev/tooling.nix).
@@ -32,6 +37,8 @@ in
     }:
     let
       version = "0.1.8";
+      # The background server's T3 home (the desktop app's is ~/.t3).
+      serverHome = "${config.home.homeDirectory}/.t3-server";
       src = pkgs.fetchurl {
         url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
         hash = "sha256-4Rdpi+TMWeXsFBbFHf1EKlPvoxQZd7wgy9DYH9P9WCQ=";
@@ -68,7 +75,7 @@ in
       # inside (the wrapper without the app's Wayland flags, which Node
       # would reject).
       t3-cli = pkgs.writeShellScriptBin "t3" ''
-        export T3CODE_HOME="''${T3CODE_HOME:-$HOME/.t3}"
+        export T3CODE_HOME="''${T3CODE_HOME:-${serverHome}}"
         export T3CODE_CLI_PATH="/etc/profiles/per-user/$USER/bin/t3"
         export ELECTRON_RUN_AS_NODE=1
         exec ${t3-desktop}/bin/.t3-code-wrapped ${contents}/resources/app.asar/apps/server/dist/bin.mjs "$@"
@@ -85,8 +92,8 @@ in
       # Connect tunnel and no Tailscale. Only NetBird reaches it: the firewall
       # opens 3773 on wt0 alone. T3 keeps its other service settings here.
       home.activation.t3ServiceEnv = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        f=${config.home.homeDirectory}/.t3/service.env
-        run mkdir -p ${config.home.homeDirectory}/.t3
+        f=${serverHome}/service.env
+        run mkdir -p ${serverHome}
         touch "$f"
         if grep -q '^T3CODE_LAN=' "$f"; then
           run ${pkgs.gnused}/bin/sed -i 's/^T3CODE_LAN=.*/T3CODE_LAN=true/' "$f"
@@ -103,13 +110,20 @@ in
         Unit.Description = "Install T3 Code's background server for this version";
         Service = {
           Type = "oneshot";
-          Environment = [ "T3CODE_HOME=%h/.t3" ];
+          Environment = [ "T3CODE_HOME=${serverHome}" ];
           ExecStart = "${pkgs.writeShellScript "t3-install" ''
             unit=$HOME/.config/systemd/user/t3code.service
             # The app's own `t3` from before T3CODE_INSTALL_BIN_DIR: it shadows ours.
             shim=$HOME/.local/bin/t3
             if [ -f "$shim" ] && ${pkgs.gnugrep}/bin/grep -q "Written by T3 Code" "$shim"; then ${pkgs.coreutils}/bin/rm -f "$shim"; fi
-            if [ ! -f "$unit" ] || [ ! -e "$HOME/.t3/runtime/versions/${version}/.install-complete" ]; then
+            # One installed before the server had its own home serves ~/.t3,
+            # which locks the desktop app out: remove it.
+            if [ -f "$unit" ] && ! ${pkgs.gnugrep}/bin/grep -qF "T3CODE_HOME=${serverHome}" "$unit"; then
+              ${pkgs.systemd}/bin/systemctl --user disable --now t3code.service || true
+              T3CODE_HOME=$HOME/.t3 ${t3-cli}/bin/t3 service uninstall || ${pkgs.coreutils}/bin/rm -f "$unit"
+              ${pkgs.coreutils}/bin/rm -f "$unit"
+            fi
+            if [ ! -f "$unit" ] || [ ! -e "${serverHome}/runtime/versions/${version}/.install-complete" ]; then
               ${t3-cli}/bin/t3 service install
             fi
             ${pkgs.systemd}/bin/systemctl --user daemon-reload
