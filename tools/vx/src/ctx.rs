@@ -28,7 +28,7 @@ pub const DEFAULT_NIXOS_HOST: &str = "arc";
 pub const MAC_HOST: &str = "Vainnors-MacBook-Pro";
 /// SSH targets for `vx @arc ...` / `vx @mac ...` (NetBird names); other hosts
 /// are `<user>@<name>.netbird.cloud`.
-pub const ARC_SSH: &str = "vainnor@arc-211-139.netbird.cloud";
+pub const ARC_SSH: &str = "vainnor@arc.netbird.cloud";
 pub const MAC_SSH: &str = "vainnor@vainnors-macbook-pro.netbird.cloud";
 
 /// The NixOS host to build: this machine's hostname on Linux (each host's

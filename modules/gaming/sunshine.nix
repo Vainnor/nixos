@@ -9,7 +9,7 @@
 # First run, once per client:
 #   1. Admin login: on the PC open https://localhost:47990 (or from the Mac,
 #      `ssh -L 47990:localhost:47990 arc` and open https://localhost:47990).
-#   2. In Moonlight add the PC by its NetBird name (arc-211-139.netbird.cloud),
+#   2. In Moonlight add the PC by its NetBird name (arc.netbird.cloud),
 #      then type the PIN it shows into the web UI's PIN page.
 {
   flake.modules.nixos.gaming = {

@@ -17,7 +17,7 @@
           ProgramArguments = [
             "${pkgs.socat}/bin/socat"
             "TCP-LISTEN:13773,bind=127.0.0.1,reuseaddr,fork"
-            "TCP:arc-211-139.netbird.cloud:3773"
+            "TCP:arc.netbird.cloud:3773"
           ];
           RunAtLoad = true;
           KeepAlive = true;
