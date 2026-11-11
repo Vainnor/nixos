@@ -503,8 +503,9 @@ claude auth login
 env CLAUDE_CONFIG_DIR=$HOME/.claude-max claude auth login
 ```
 
-T3 Code's server (`systemctl --user status t3code`) listens on 3773, open on NetBird only. It
-starts once T3 is installed (`~/.t3/bin/t3`), and both logins show up in it as providers.
+T3 Code's server listens on 3773, open on NetBird only. Install it the way T3 installs on any
+Linux box; it writes and updates its own `t3code.service`, and Nix adds a drop-in with your PATH
+and the 1Password SSH agent. Both logins show up in it as providers.
 
 ## The Mac
 
