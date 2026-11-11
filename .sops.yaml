@@ -2,10 +2,10 @@
 #   sops updatekeys secrets/secrets.yaml
 keys:
   - &mac age1g8rwdq87ewjphu9s4f4dhx03sxg33a7xxs78l2rcwa9zhgvyxpnsxx056y # MacBook (edits secrets)
-  # - &arc age1...   # the PC: `vx secrets host` prints it
+  - &arc age14rm5e0p78tp43ecjxmfery4zmqg4d43d2wmw8wnqs9z8xu0ldepsvl0nyd # arc
 creation_rules:
   - path_regex: secrets/[^/]+\.yaml$
     key_groups:
       - age:
           - *mac
-          # - *arc
+          - *arc

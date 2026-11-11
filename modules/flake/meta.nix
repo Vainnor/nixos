@@ -51,7 +51,7 @@
     # (`vx secrets host` on the PC, then `vx secrets add-host <key>` on the Mac).
     # false: nothing reads secrets.yaml (Wi-Fi, NetBird key, stream keys,
     # restic and the cache token are all skipped).
-    secretsReady = false;
+    secretsReady = true;
 
     # Your Windows account in the VMs (WinApps logs in as this; use a password, not a PIN).
     windowsUser = "vainnor";
