@@ -149,6 +149,9 @@ in
         [Service]
         Environment="PATH=%h/.nix-profile/bin:/etc/profiles/per-user/%u/bin:/run/wrappers/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin"
         Environment="SSH_AUTH_SOCK=%h/.1password/agent.sock"
+        # Rootless Docker (dev/containers.nix): its socket is the user's, and
+        # agents' `docker`/`docker compose` look for /var/run/docker.sock without this.
+        Environment="DOCKER_HOST=unix://%t/docker.sock"
       '';
     };
 }
