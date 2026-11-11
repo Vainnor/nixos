@@ -2,13 +2,13 @@
 # Reachable over NetBird only: the firewall opens 3773 on wt0 alone, and the
 # NetBird policy decides which peers get there.
 #
-# T3 installs and updates itself: it writes its own user unit,
-# ~/.config/systemd/user/t3code.service (ExecStart under ~/.t3/runtime), and
-# rewrites it on each update, so the unit stays T3's. Nix adds a drop-in with
-# what the unit can't know here: the PATH to the user's tools (git, nix, gh,
-# direnv, claude) and the 1Password SSH agent. Its binaries run through nix-ld
-# (dev/tooling.nix). Once T3 has installed its unit, each switch makes sure it's
-# enabled and running.
+# Nothing to set up by hand: each switch runs `t3 service install` when the
+# background server isn't installed at this package's version, which writes
+# T3's own user unit (~/.config/systemd/user/t3code.service, ExecStart under
+# ~/.t3/runtime), then makes sure it's enabled and running. Nix adds a drop-in
+# with what the unit can't know here: the PATH to the user's tools (git, nix,
+# gh, direnv, claude) and the 1Password SSH agent. Its binaries run through
+# nix-ld (dev/tooling.nix).
 #
 # The desktop app is T3's AppImage from its releases, pinned here (its own
 # updater can't replace a store path): bump version and hash to update.
@@ -49,7 +49,10 @@ in
           # it looks for an X server and exits.
           source ${pkgs.makeWrapper}/nix-support/setup-hook
           wrapProgram $out/bin/t3-code \
-            --add-flags "--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime"
+            --add-flags "--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime" \
+            --run 'export T3CODE_INSTALL_BIN_DIR="$HOME/.t3/app-bin"'
+          # ^ The app writes its own `t3` command there, off PATH: that one runs
+          #   outside the sandbox and fails on NixOS; t3-cli below is the one.
 
           desktop=$(find ${contents} -maxdepth 1 -name '*.desktop' | head -n1)
           install -Dm644 "$desktop" $out/share/applications/t3-code.desktop
@@ -92,8 +95,17 @@ in
         fi
       '';
 
-      home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+      home.activation.t3Service = lib.hm.dag.entryAfter [ "reloadSystemd" "t3ServiceEnv" ] ''
+        export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
         unit=${config.xdg.configHome}/systemd/user/t3code.service
+        # The app's own `t3` from before T3CODE_INSTALL_BIN_DIR: it shadows ours.
+        shim=${config.home.homeDirectory}/.local/bin/t3
+        if [ -f "$shim" ] && grep -q "Written by T3 Code" "$shim"; then
+          run rm -f "$shim"
+        fi
+        if [ ! -f "$unit" ] || [ ! -e ${config.home.homeDirectory}/.t3/runtime/versions/${version}/.install-complete ]; then
+          run ${t3-cli}/bin/t3 service install || echo "t3 service install failed; see ~/.t3/userdata/logs" >&2
+        fi
         if [ -f "$unit" ]; then
           run ${pkgs.systemd}/bin/systemctl --user daemon-reload || true
           run ${pkgs.systemd}/bin/systemctl --user enable --now t3code.service || true
