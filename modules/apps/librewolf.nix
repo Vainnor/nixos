@@ -274,19 +274,30 @@ in
       sideberySettings = sideberyData // {
         sidebarCSS = sideberyCSS config.lib.stylix.colors;
       };
-      # The "v2" re-applies once, for the reset that also restores storage.js.
-      sideberyHash = builtins.hashString "sha256" ("v2" + builtins.toJSON sideberySettings);
+      # Bump the "v3" to re-apply once without a setup change (v3: after the
+      # permissions grant, since Sidebery had turned the reopen rules off).
+      sideberyHash = builtins.hashString "sha256" ("v3" + builtins.toJSON sideberySettings);
       sideberyStorage = pkgs.writeText "sidebery-storage.js" (builtins.toJSON sideberySettings);
       sideberyApply = pkgs.writeShellScript "sidebery-apply" ''
         for prof in ${lib.concatStringsSep " " (lib.attrNames config.programs.librewolf.profiles)}; do
           dir="${config.home.homeDirectory}/${config.programs.librewolf.profilesPath}/$prof"
           stamp="$dir/.sidebery-applied"
           [ -f "$dir/prefs.js" ] || continue
-          [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
           if ${pkgs.procps}/bin/pgrep -u "$(id -u)" -f '/bin/\.?librewolf' >/dev/null; then
+            [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
             echo "LibreWolf is open: Sidebery's new setup goes in at the next login or switch with it closed" >&2
             continue
           fi
+          # Sidebery's optional permissions: without them it turns the
+          # sections' reopen rules and the I2P proxy off at every start.
+          prefs="$dir/extension-preferences.json"
+          [ -s "$prefs" ] || echo '{}' > "$prefs"
+          ${pkgs.jq}/bin/jq --arg id '${sidebery}' '
+            .[$id] = ((.[$id] // {permissions: [], origins: [], data_collection: []})
+              | .permissions = ((.permissions + ["proxy", "webRequest", "webRequestBlocking"]) | unique)
+              | .origins = ((.origins + ["<all_urls>"]) | unique))
+          ' "$prefs" > "$prefs.tmp" && mv "$prefs.tmp" "$prefs"
+          [ "$(cat "$stamp" 2>/dev/null)" = "${sideberyHash}" ] && continue
           uuid=$(${pkgs.gnused}/bin/sed -n 's/.*\\"{3c078156-979c-498b-8990-85f7987dd929}\\":\\"\([0-9a-f-]*\)\\".*/\1/p' "$dir/prefs.js")
           if [ -n "$uuid" ]; then
             rm -rf "$dir/storage/default/moz-extension+++$uuid^userContextId=4294967295"
