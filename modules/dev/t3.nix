@@ -59,9 +59,23 @@ in
           fi
         '';
       };
+      # The `t3` CLI (`t3 service install`, `t3 service status`, ...). The app's
+      # own ~/.t3/bin/t3 runs the bundled binary outside the AppImage's
+      # sandbox, where it finds none of its libraries on NixOS; this runs it
+      # inside (the wrapper without the app's Wayland flags, which Node
+      # would reject).
+      t3-cli = pkgs.writeShellScriptBin "t3" ''
+        export T3CODE_HOME="''${T3CODE_HOME:-$HOME/.t3}"
+        export T3CODE_CLI_PATH="/etc/profiles/per-user/$USER/bin/t3"
+        export ELECTRON_RUN_AS_NODE=1
+        exec ${t3-desktop}/bin/.t3-code-wrapped ${contents}/resources/app.asar/apps/server/dist/bin.mjs "$@"
+      '';
     in
     lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
-      home.packages = [ t3-desktop ];
+      home.packages = [
+        t3-desktop
+        (lib.hiPrio t3-cli)
+      ];
 
       # The background server listens beyond this machine (T3CODE_LAN), so the
       # Mac links to it straight over NetBird (http://<arc>:3773), with no T3
