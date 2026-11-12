@@ -207,7 +207,32 @@ in
           inactive_colors=${active}
           disabled_colors=${disabled}
         '';
+      # QMenu in the same look as the GTK menus above. Fusion stays the
+      # style for everything else; this sheet only touches menus.
+      qtMenus = pkgs.writeText "menus.qss" ''
+        QMenu {
+          background-color: #${c.base01};
+          color: #${c.base05};
+          border: 1px solid #${border};
+          padding: 2px 0;
+        }
+        QMenu::item {
+          background: transparent;
+          padding: 4px 18px 4px 10px;
+        }
+        QMenu::item:selected {
+          background-color: #${c.base0D};
+          color: #${c.base00};
+        }
+        QMenu::item:disabled { color: #${c.base03}; }
+        QMenu::separator {
+          height: 1px;
+          background: #${border};
+          margin: 2px 0;
+        }
+      '';
       qtctSettings = {
+        Interface.stylesheets = "${qtMenus}";
         Appearance = {
           style = "Fusion";
           custom_palette = true;
@@ -223,7 +248,65 @@ in
     in
     {
       stylix.targets.rofi.enable = false; # not used; silences an upstream warning
-      stylix.targets.gtk.extraCss = "* { border-radius: 0; box-shadow: none; }";
+      # Menus everywhere are one look: square, flat, a 1px border in the
+      # palette's border colour, the accent behind the item under the pointer.
+      # GTK3 menus (Thunar, ...), GTK4/libadwaita popover menus, and Qt's
+      # QMenu (Qt apps and the bar's tray menus) below; LibreWolf's in
+      # apps/librewolf.nix. Electron apps draw their own menus.
+      stylix.targets.gtk.extraCss = ''
+        * { border-radius: 0; box-shadow: none; }
+
+        /* GTK3 menus */
+        menu, .menu, .context-menu {
+          background-color: #${c.base01};
+          color: #${c.base05};
+          border: 1px solid #${border};
+          padding: 2px 0;
+          margin: 0;
+        }
+        menu menuitem, .menu menuitem, .context-menu menuitem {
+          min-height: 0;
+          padding: 4px 10px;
+          background: none;
+        }
+        menu menuitem:hover, .menu menuitem:hover, .context-menu menuitem:hover {
+          background-color: #${c.base0D};
+          color: #${c.base00};
+        }
+        menu menuitem:hover *, .menu menuitem:hover * { color: #${c.base00}; }
+        menu menuitem:disabled, .menu menuitem:disabled { color: #${c.base03}; }
+        menu separator, .menu separator {
+          background-color: #${border};
+          min-height: 1px;
+          margin: 2px 0;
+        }
+        window.popup decoration, .csd.popup decoration { box-shadow: none; border: none; }
+
+        /* GTK4 / libadwaita popover menus */
+        popover.menu > contents, popover.menu > arrow {
+          background-color: #${c.base01};
+          color: #${c.base05};
+          border: 1px solid #${border};
+          box-shadow: none;
+        }
+        popover.menu > contents { padding: 2px 0; }
+        popover.menu { margin: 0; padding: 0; }
+        popover.menu modelbutton {
+          min-height: 0;
+          padding: 4px 10px;
+        }
+        popover.menu modelbutton:hover, popover.menu modelbutton:selected,
+        popover.menu modelbutton:focus-visible {
+          background-color: #${c.base0D};
+          color: #${c.base00};
+        }
+        popover.menu modelbutton:disabled { color: #${c.base03}; }
+        popover.menu separator {
+          background-color: #${border};
+          min-height: 1px;
+          margin: 2px 0;
+        }
+      '';
 
       # Qt: Fusion with the palette, set through qt5ct/qt6ct, instead of Stylix's
       # Kvantum theme. That theme draws its round corners and menu shadows as

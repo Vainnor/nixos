@@ -24,7 +24,37 @@ let
   sidebery = "{3c078156-979c-498b-8990-85f7987dd929}";
   stylus = "{7a7a4a92-a2a0-41d1-9fd7-1e92480d612d}";
 
-  userChrome = builtins.readFile ../../assets/librewolf/userChrome.css;
+  # The stylesheet, plus menus in the desktop's look (theme.nix has the same
+  # for GTK and Qt): flat, 1px border, the accent behind the active item.
+  userChrome =
+    c:
+    let
+      border = if palette.extra.border != null then palette.extra.border else c.base02;
+    in
+    builtins.readFile ../../assets/librewolf/userChrome.css
+    + ''
+
+      menupopup, panel {
+        --panel-background-color: #${c.base01} !important;
+        --panel-text-color: #${c.base05} !important;
+        --panel-border-color: #${border} !important;
+        --panel-separator-color: #${border} !important;
+        --panel-padding: 2px 0 !important;
+        --menuitem-margin: 0 !important;
+      }
+      menupopup > menuitem, menupopup > menu {
+        margin: 0 !important;
+        padding-inline: 10px !important;
+      }
+      menupopup > menuitem[_moz-menuactive]:not([disabled]),
+      menupopup > menu[_moz-menuactive]:not([disabled]) {
+        background-color: #${c.base0D} !important;
+        color: #${c.base00} !important;
+      }
+      menupopup > menuitem[disabled], menupopup > menu[disabled] {
+        color: #${c.base03} !important;
+      }
+    '';
 
   # Fill the @baseXX@ / @border@ / @accent2@ placeholders from the theme.
   userContent =
@@ -322,7 +352,7 @@ in
         done
       '';
       look = {
-        inherit userChrome;
+        userChrome = userChrome config.lib.stylix.colors;
         userContent = userContent config.lib.stylix.colors;
         inherit containers;
         containersForce = true;
@@ -418,7 +448,7 @@ in
           chrome = "Library/Application Support/librewolf/Profiles/${meta.macLibrewolfProfile}/chrome";
         in
         {
-          home.file."${chrome}/userChrome.css".text = userChrome;
+          home.file."${chrome}/userChrome.css".text = userChrome config.lib.stylix.colors;
           home.file."${chrome}/userContent.css".text = userContent config.lib.stylix.colors;
         }
       );
