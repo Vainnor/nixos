@@ -45,7 +45,8 @@ in
           envrc = "use flake ${meta.flakePath}#aviodeck-link";
         };
       }
-      # vZDC (projects/vzdc.nix): website twice, master and next.
+      # vZDC (projects/vzdc.nix): website and discord-bot twice,
+      # master and next.
       //
         lib.mapAttrs'
           (name: p: {
@@ -66,6 +67,10 @@ in
             ids = { };
             asx = { };
             discord-bot = { };
+            discord-bot-next = {
+              repo = "discord-bot";
+              branch = "next";
+            };
             moodle = {
               repo = "vzdc-moodle";
               branch = "main";

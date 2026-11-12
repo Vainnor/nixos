@@ -12,7 +12,8 @@
 # sqlx-cli and psql. Its tests use the database only with DATABASE_URL set.
 #
 # discord-bot is Python 3.13 (pyproject.toml) with uv: the shell makes .venv
-# from requirements.txt the first time and activates it.
+# from requirements.txt the first time and activates it. Its next branch is a
+# rewrite in Rust (serenity, rustls), on stable like osmium.
 #
 # moodle builds a Docker image; the shell has PHP 8.3 with Moodle's extensions
 # for linting and editing, Composer, shellcheck and hadolint. Its test stack
@@ -77,6 +78,17 @@
             openssl
             sqlx-cli
             postgresql_17
+          ];
+          shellHook = dockerHost;
+        };
+
+        vzdc-discord-bot-next = pkgs.mkShell {
+          packages = with pkgs; [
+            cargo
+            rustc
+            clippy
+            rustfmt
+            pkg-config
           ];
           shellHook = dockerHost;
         };
