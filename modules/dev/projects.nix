@@ -3,8 +3,8 @@
 # (`gh auth login`; most are private), and gives each a local .envrc (direnv
 # loads the shell on `cd`, and agent sessions get it through dev/claude.nix's
 # hook), listed in .git/info/exclude so it never reaches the repo. An existing
-# checkout or .envrc is left alone. direnv trusts exactly these four .envrc
-# files (not the folders), so a repo's own .envrc elsewhere still needs
+# checkout or .envrc is left alone. direnv trusts exactly these .envrc files
+# (not the folders), so a repo's own .envrc elsewhere still needs
 # `direnv allow`.
 { config, ... }:
 let
@@ -44,7 +44,33 @@ in
           branch = "main";
           envrc = "use flake ${meta.flakePath}#aviodeck-link";
         };
-      };
+      }
+      # vZDC (projects/vzdc.nix): website twice, master and next.
+      //
+        lib.mapAttrs'
+          (name: p: {
+            name = "vZDC/${name}";
+            value = {
+              repo = "vzdc-artcc/${p.repo or name}";
+              branch = p.branch or "master";
+              envrc = "use flake ${meta.flakePath}#vzdc-${name}";
+            };
+          })
+          {
+            website = { };
+            website-next = {
+              repo = "website";
+              branch = "next";
+            };
+            osmium = { };
+            ids = { };
+            asx = { };
+            discord-bot = { };
+            moodle = {
+              repo = "vzdc-moodle";
+              branch = "main";
+            };
+          };
       gh = lib.getExe pkgs.gh;
       write = dir: p: ''
         d=${home}/Programing/${dir}
