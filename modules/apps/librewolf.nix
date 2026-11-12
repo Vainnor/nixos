@@ -153,6 +153,13 @@ let
   # tabs in no container. Keep the sections' patterns disjoint: Sidebery checks
   # containers in id order (as sorted strings), so overlaps would pick by that.
   host = d: "^https?://([0-9A-Za-z-]+\\.)*${lib.escapeRegex d}(:[0-9]+)?([/?#]|$)";
+  # A host, minus some paths: those pages stay in the container they opened
+  # in. Sign-in pages, so "Sign in with GitHub" on another section's site
+  # (portainer.vzdc.org) logs in there instead of moving to Dev, where the
+  # site's cookies aren't.
+  hostExcept =
+    d: paths:
+    "^https?://([0-9A-Za-z-]+\\.)*${lib.escapeRegex d}(:[0-9]+)?(?!/(${lib.concatStringsSep "|" paths})([/?#]|$))([/?#]|$)";
   sections = [
     {
       name = "Personal";
@@ -234,8 +241,15 @@ let
       color = "purple";
       icon = "briefcase";
       sites =
-        map host [
-          "github.com"
+        [
+          # OAuth (login/oauth/authorize), its sign-in and 2FA steps.
+          (hostExcept "github.com" [
+            "login"
+            "session"
+            "sessions"
+          ])
+        ]
+        ++ map host [
           "githubusercontent.com"
           "gitlab.com"
           "codeberg.org"
