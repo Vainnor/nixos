@@ -240,34 +240,33 @@ let
       name = "Dev";
       color = "purple";
       icon = "briefcase";
-      sites =
-        [
-          # OAuth (login/oauth/authorize), its sign-in and 2FA steps.
-          (hostExcept "github.com" [
-            "login"
-            "session"
-            "sessions"
-          ])
-        ]
-        ++ map host [
-          "githubusercontent.com"
-          "gitlab.com"
-          "codeberg.org"
-          "nixos.org"
-          "nix.dev"
-          "noogle.dev"
-          "crates.io"
-          "docs.rs"
-          "rust-lang.org"
-          "npmjs.com"
-          "stackoverflow.com"
-          "developer.mozilla.org"
-          "hub.docker.com"
-          "claude.ai"
-          "t3.codes"
-        ]
-        # Anything on this machine, except the i2pd console (I2P).
-        ++ [ "^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\])(?!:7070([/?#]|$))(:[0-9]+)?([/?#]|$)" ];
+      sites = [
+        # OAuth (login/oauth/authorize), its sign-in and 2FA steps.
+        (hostExcept "github.com" [
+          "login"
+          "session"
+          "sessions"
+        ])
+      ]
+      ++ map host [
+        "githubusercontent.com"
+        "gitlab.com"
+        "codeberg.org"
+        "nixos.org"
+        "nix.dev"
+        "noogle.dev"
+        "crates.io"
+        "docs.rs"
+        "rust-lang.org"
+        "npmjs.com"
+        "stackoverflow.com"
+        "developer.mozilla.org"
+        "hub.docker.com"
+        "claude.ai"
+        "t3.codes"
+      ]
+      # Anything on this machine, except the i2pd console (I2P).
+      ++ [ "^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\])(?!:7070([/?#]|$))(:[0-9]+)?([/?#]|$)" ];
     }
     {
       name = "I2P";
