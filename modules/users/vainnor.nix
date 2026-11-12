@@ -108,7 +108,19 @@ in
         ripgrep.enable = true;
         fd.enable = true;
         btop.enable = true;
-        yazi.enable = true;
+        yazi = {
+          enable = true;
+          # Yazi hard-codes rounded borders on its popups (input, confirm,
+          # tasks, help, which, notify, spot) and on Lua ui.Border; square
+          # them to match the rest of the desktop.
+          package = pkgs.yazi.override {
+            yazi-unwrapped = pkgs.yazi-unwrapped.overrideAttrs (old: {
+              postPatch = (old.postPatch or "") + ''
+                find . -name '*.rs' -exec sed -i 's/BorderType::Rounded/BorderType::Plain/g' {} +
+              '';
+            });
+          };
+        };
       };
 
       home.packages = with pkgs; [
