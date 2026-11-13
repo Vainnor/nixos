@@ -71,16 +71,16 @@ function = "0"
 uid = "vx-cpu-fan"
 name = "CPU fan (Tctl)"
 p_type = "Graph"
-function_uid = "0"
-speed_profile = [[40.0, 30], [60.0, 45], [70.0, 60], [80.0, 85], [85.0, 100]]
+function_uid = "vx-idle-stop"
+speed_profile = [[49.0, 0], [50.0, 30], [60.0, 45], [70.0, 60], [80.0, 85], [85.0, 100]]
 temp_source = { temp_name = "temp1", device_uid = "3145e1a42801faf9cf948df8c705afb4859f084c10a7e7c5e4efecb1e0167127" }
 
 [[profiles]]
 uid = "vx-case-fans"
 name = "Case fans (Tctl)"
 p_type = "Graph"
-function_uid = "0"
-speed_profile = [[40.0, 30], [60.0, 40], [70.0, 55], [80.0, 80], [85.0, 100]]
+function_uid = "vx-idle-stop"
+speed_profile = [[49.0, 0], [50.0, 35], [60.0, 40], [70.0, 55], [80.0, 80], [85.0, 100]]
 temp_source = { temp_name = "temp1", device_uid = "3145e1a42801faf9cf948df8c705afb4859f084c10a7e7c5e4efecb1e0167127" }
 
 # A list of functions to be applied to the various profiles
@@ -89,6 +89,16 @@ temp_source = { temp_name = "temp1", device_uid = "3145e1a42801faf9cf948df8c705a
 uid = "0"
 name = "Default Function"
 f_type = "Identity"
+
+[[functions]]
+uid = "vx-idle-stop"
+name = "Idle stop (5 °C hysteresis)"
+f_type = "Standard"
+duty_minimum = 0
+duty_maximum = 100
+response_delay = 5
+deviance = 5.0
+only_downward = true
 
 
 # Cooler Control Settings
