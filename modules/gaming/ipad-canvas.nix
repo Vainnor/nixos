@@ -6,11 +6,19 @@
 # ~3:2 iPad leaves a tiny letterboxed canvas. So the "Aseprite (iPad)" app in
 # Moonlight gets its own screen instead:
 #
-#   start: Mango creates a virtual output "ipad" the size of the iPad's
-#          display, Aseprite opens (or the running one moves) onto it, and
-#          Sunshine streams that output.
-#   quit:  (Moonlight > long-press the app > Quit) Aseprite moves back to the
-#          main screen and the virtual output goes away.
+#   start: Mango creates a virtual output "ipad" at exactly the resolution and
+#          frame rate Moonlight asked for (so nothing is scaled or
+#          letterboxed), at 2x for a readable UI on a high-DPI client.
+#          Sunshine streams that output, and Aseprite opens (or the running
+#          one moves) onto it, fullscreen.
+#   quit:  (Moonlight > long-press the app > Quit) Aseprite leaves fullscreen,
+#          moves back to the main screen, and the virtual output goes away.
+#
+# Pencil pressure: Aseprite (X11, under XWayland) looks for a "stylus" input
+# device once, when it starts, and Sunshine only creates its virtual pen when
+# the stream connects. So Aseprite is launched only once XWayland has that
+# device. One that was already open before the first iPad session of a login
+# never sees the pen: restart it once.
 #
 # Sunshine's screen choice is one global setting (output_name). It's "ipad":
 # when that output doesn't exist Sunshine falls back to its first screen, the
@@ -20,25 +28,16 @@
 # Setting apps and output_name here means Sunshine's web UI can no longer
 # change its settings or apps (pairing and PINs still work there).
 #
-# iPad setup, once: install NetBird (same account) and Moonlight, add
-# arc.netbird.cloud and pair (see sunshine.nix), and in Moonlight's settings
-# set the resolution to the iPad's native one.
+# iPad setup, once: install NetBird (its peer must be in the
+# remote-desktop-clients group, which the Sunshine policies allow) and
+# Moonlight, add arc.netbird.cloud and pair (see sunshine.nix). In Moonlight's
+# settings pick the "Full Screen" resolution (the iPad's own) and Touchscreen
+# touch mode.
 { ... }:
 let
   output = "ipad";
-  # iPad mini 6th/7th gen: 2266x1488 pixels, drawn at 2x so Aseprite's UI is a
-  # readable size on an 8.3" screen. (5th gen: 2048x1536.)
-  width = 2266;
-  height = 1488;
-  scale = 2;
 in
 {
-  flake.modules.homeManager.gaming = {
-    wayland.windowManager.mango.settings.monitor_rule = [
-      "name:^${output}$,width:${toString width},height:${toString height},refresh:60,scale:${toString scale}"
-    ];
-  };
-
   flake.modules.nixos.gaming =
     { config, lib, pkgs, ... }:
     let
@@ -49,8 +48,11 @@ in
         runtimeInputs = [
           mango
           pkgs.jq
+          pkgs.wlr-randr
+          pkgs.xinput
           pkgs.util-linux
           pkgs.coreutils
+          pkgs.gnugrep
         ];
         text = ''
           shopt -s nullglob
@@ -67,11 +69,34 @@ in
           asepriteWindows() {
             mmsg get all-clients | jq -r '.clients[] | select(.appid | test("^aseprite$"; "i")) | .id'
           }
+          isFullscreen() {
+            mmsg get client "$1" | jq -e '.is_fullscreen' >/dev/null
+          }
+          # Onto the iPad screen, fullscreen.
+          place() {
+            mmsg dispatch tagmon,${output} client,"$1" >/dev/null
+            isFullscreen "$1" || mmsg dispatch togglefullscreen client,"$1" >/dev/null
+          }
+          hasStylus() {
+            xinput list --name-only 2>/dev/null | grep -qi stylus
+          }
 
           case "''${1:-}" in
+            # Sunshine prep command: the screen, sized like the client's stream.
             start)
-              has_output || mmsg dispatch create_virtual_output,${output}
+              width="''${SUNSHINE_CLIENT_WIDTH:-2266}"
+              height="''${SUNSHINE_CLIENT_HEIGHT:-1488}"
+              fps="''${SUNSHINE_CLIENT_FPS:-60}"
+              scale=1
+              [ "$height" -ge 1200 ] && scale=2
+              has_output || mmsg dispatch create_virtual_output,${output} >/dev/null
               for _ in $(seq 50); do has_output && break; sleep 0.1; done
+              wlr-randr --output ${output} --custom-mode "''${width}x''${height}@''${fps}Hz" --scale "$scale"
+              for id in $(asepriteWindows); do place "$id"; done
+              ;;
+            # Sunshine detached command: Aseprite, once the pen exists.
+            launch)
+              for _ in $(seq 150); do hasStylus && break; sleep 0.2; done
               ids="$(asepriteWindows)"
               if [ -z "$ids" ]; then
                 setsid -f ${lib.getExe pkgs.aseprite} >/dev/null 2>&1
@@ -81,16 +106,17 @@ in
                   sleep 0.1
                 done
               fi
-              for id in $ids; do mmsg dispatch tagmon,${output} client,"$id"; done
+              for id in $ids; do place "$id"; done
               ;;
             stop)
-              ${lib.optionalString (primary != null) ''
-                for id in $(asepriteWindows); do mmsg dispatch tagmon,model:${primary} client,"$id"; done
-              ''}
-              mmsg dispatch destroy_all_virtual_output
+              for id in $(asepriteWindows); do
+                if isFullscreen "$id"; then mmsg dispatch togglefullscreen client,"$id" >/dev/null; fi
+                ${lib.optionalString (primary != null) ''mmsg dispatch tagmon,model:${primary} client,"$id" >/dev/null''}
+              done
+              mmsg dispatch destroy_all_virtual_output >/dev/null
               ;;
             *)
-              echo "usage: ipad-canvas start|stop" >&2
+              echo "usage: ipad-canvas start|launch|stop" >&2
               exit 2
               ;;
           esac
@@ -129,6 +155,7 @@ in
                 undo = "${lib.getExe canvas} stop";
               }
             ];
+            detached = [ "${lib.getExe canvas} launch" ];
           }
         ];
       };
