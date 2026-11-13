@@ -39,6 +39,8 @@ in
       version = "0.1.8";
       # The background server's T3 home (the desktop app's is ~/.t3).
       serverHome = "${config.home.homeDirectory}/.t3-server";
+      # Claude's temp dir on disk (dev/claude.nix), for the agents T3 starts.
+      tmpdir = config.home.sessionVariables.CLAUDE_CODE_TMPDIR;
       src = pkgs.fetchurl {
         url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
         hash = "sha256-4Rdpi+TMWeXsFBbFHf1EKlPvoxQZd7wgy9DYH9P9WCQ=";
@@ -57,7 +59,8 @@ in
           source ${pkgs.makeWrapper}/nix-support/setup-hook
           wrapProgram $out/bin/t3-code \
             --add-flags "--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime" \
-            --run 'export T3CODE_INSTALL_BIN_DIR="$HOME/.t3/app-bin"'
+            --run 'export T3CODE_INSTALL_BIN_DIR="$HOME/.t3/app-bin"' \
+            --set-default CLAUDE_CODE_TMPDIR ${tmpdir}
           # ^ The app writes its own `t3` command there, off PATH: that one runs
           #   outside the sandbox and fails on NixOS; t3-cli below is the one.
 
@@ -149,6 +152,7 @@ in
         [Service]
         Environment="PATH=%h/.nix-profile/bin:/etc/profiles/per-user/%u/bin:/run/wrappers/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin"
         Environment="SSH_AUTH_SOCK=%h/.1password/agent.sock"
+        Environment="CLAUDE_CODE_TMPDIR=${tmpdir}"
         # Rootless Docker (dev/containers.nix): its socket is the user's, and
         # agents' `docker`/`docker compose` look for /var/run/docker.sock without this.
         Environment="DOCKER_HOST=unix://%t/docker.sock"

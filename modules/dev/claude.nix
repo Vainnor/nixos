@@ -11,6 +11,11 @@
 # Agent sessions (T3, `claude`) start in a project folder but their Bash tool
 # doesn't load direnv, so a SessionStart hook exports the folder's direnv
 # environment into the session (the project's devShell: compilers, libraries).
+#
+# Claude's temp dir (session scratchpads, where agents clone repos and run
+# cargo builds) is on disk at ~/.cache/claude-tmp, not /tmp: /tmp lives in the
+# RAM-backed `/` (hosts/_disko.nix), which gigabytes of `target/` fill up.
+# Files untouched for 7 days are cleaned out. T3 (dev/t3.nix) passes it on too.
 {
   flake.modules.nixos.dev.unfree.allowed = [ "claude-code" ];
 
@@ -88,6 +93,10 @@
         done
       '';
 
-      home.sessionVariables.CLAUDE_CODE_DISABLE_AUTOUPDATER = "1"; # Nix updates it
+      home.sessionVariables = {
+        CLAUDE_CODE_DISABLE_AUTOUPDATER = "1"; # Nix updates it
+        CLAUDE_CODE_TMPDIR = "${home}/.cache/claude-tmp";
+      };
+      systemd.user.tmpfiles.rules = [ "d ${home}/.cache/claude-tmp 0700 - - 7d" ];
     };
 }
