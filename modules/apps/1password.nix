@@ -1,5 +1,5 @@
 # 1Password: the app (starts in the tray at login), its CLI, the SSH agent and
-# the LibreWolf extension. SSH keys never touch the disk: `ssh` and git
+# the LibreWolf and Helium extensions. SSH keys never touch the disk: `ssh` and git
 # signing ask 1Password, which asks you to unlock.
 #
 # One-time in the app: Settings > Developer > "Use the SSH agent" and
@@ -21,9 +21,12 @@ in
     };
     # The extension only talks to browsers 1Password trusts.
     environment.etc."1password/custom_allowed_browsers" = {
-      text = "librewolf\n";
+      text = "librewolf\nhelium\n";
       mode = "0755";
     };
+    # Helium finds the app through the manifest 1Password writes to
+    # ~/.config/google-chrome/NativeMessagingHosts.
+    programs.chromium.extensions = [ "aeblfdkhhhdcdjpifhhbdiojplfjncoa" ];
   };
 
   flake.modules.homeManager.desktop =
