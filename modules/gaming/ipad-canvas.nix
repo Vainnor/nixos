@@ -38,6 +38,17 @@ let
   output = "ipad";
 in
 {
+  # Sunshine's virtual pen reports positions relative to the streamed screen
+  # (0..1 across it), but an unmapped tablet spans every monitor, so the
+  # Pencil landed all over the desktop. Pin Sunshine's pen (and touchscreen)
+  # to the iPad screen.
+  flake.modules.homeManager.gaming = {
+    wayland.windowManager.mango.settings.device_rule = [
+      "name:libvirtualhid Pen Tablet,monitor:${output}"
+      "name:libvirtualhid Touchscreen,monitor:${output}"
+    ];
+  };
+
   flake.modules.nixos.gaming =
     { config, lib, pkgs, ... }:
     let
