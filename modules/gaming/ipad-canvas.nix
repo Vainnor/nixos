@@ -137,6 +137,19 @@ in
     {
       environment.systemPackages = [ canvas ];
 
+      # libinput decides a pen's tip is down from pressure alone (above 5% of
+      # the range, up below 1%), ignoring BTN_TOUCH. A quick Pencil tap
+      # starts with almost no force, so it never got there: taps did nothing
+      # and only strokes pressed past it drew. For Sunshine's pen (pressure
+      # 0-4096), any pressure is contact. Read when Mango starts: log out and
+      # back in after changing it.
+      environment.etc."libinput/local-overrides.quirks".text = ''
+        [Sunshine virtual pen]
+        MatchName=libvirtualhid Pen Tablet
+        MatchUdevType=tablet
+        AttrPressureRange=1:0
+      '';
+
       services.sunshine = {
         settings.output_name = output;
         # Sunshine's own defaults (minus its X11-only "Low Res Desktop"), plus
