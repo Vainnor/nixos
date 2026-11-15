@@ -22,8 +22,8 @@ in
       home = config.home.homeDirectory;
       # Folder (under ~/Programing) = its GitHub repo, branch and .envrc.
       projects = {
-        # Its shell is projects/mainline.nix until Mainline's own flake.nix
-        # (chore/nix-dev-shell) is merged.
+        # Its shell is projects/mainline.nix, shared with the queue worker
+        # (it has what Mainline's own flake.nix lacks; see that file).
         "Mainline-sim/Mainline" = {
           repo = "Mainline-sim/mainline";
           branch = "next";
