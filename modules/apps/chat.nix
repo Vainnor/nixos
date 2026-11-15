@@ -30,6 +30,13 @@ in
     {
       programs.vesktop = {
         enable = true;
+        # Offer Discord's voice servers only the default route's address. With
+        # "default" WebRTC also offered NetBird's wt0 and libvirt's virbr0, and
+        # joining a call that already had people in it hung at "DTLS
+        # connecting". Merged into Vesktop's own settings.json, which it keeps
+        # writing to.
+        settings.webRTCIPHandlingPolicy = "default_public_interface_only";
+        mutableSettings = true;
         # Square and flat like the rest of the desktop (colours come from Stylix).
         vencord.settings.useQuickCss = true;
         vencord.extraQuickCss = "* { border-radius: 0 !important; box-shadow: none !important; }";
