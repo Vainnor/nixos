@@ -50,7 +50,12 @@ in
   };
 
   flake.modules.nixos.gaming =
-    { config, lib, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       mango = config.programs.mango.package;
       primary = config.vx.host.primaryMonitor;
@@ -122,7 +127,9 @@ in
             stop)
               for id in $(asepriteWindows); do
                 if isFullscreen "$id"; then mmsg dispatch togglefullscreen client,"$id" >/dev/null; fi
-                ${lib.optionalString (primary != null) ''mmsg dispatch tagmon,model:${primary} client,"$id" >/dev/null''}
+                ${lib.optionalString (
+                  primary != null
+                ) ''mmsg dispatch tagmon,model:${primary} client,"$id" >/dev/null''}
               done
               mmsg dispatch destroy_all_virtual_output >/dev/null
               ;;
