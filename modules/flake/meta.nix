@@ -96,5 +96,15 @@
     # Both machines then download from it; the PC also pushes what it builds
     # (token in sops as attic/token, so only with secretsReady).
     binaryCache = null;
+
+    # The homelab NAS's SMB shares, mounted at /mnt/nas/<share> (system/nas.nix).
+    # Login in sops as nas/username, nas/password. null = off.
+    # 10.20.1.1 is TrueNAS itself: reached over NetBird through vpn-1's
+    # 10.0.0.0/8 route when away, directly on the home LAN. Not
+    # nas.lab.vainnor.com (that's Traefik). Share set up in homelab-infra card 054.
+    nas = {
+      host = "10.20.1.1";
+      shares = [ "storage" ];
+    };
   };
 }
